@@ -1,0 +1,28 @@
+&input
+m=0.25d-3,          ! Weight of bullet [kg]
+a=3d-3,             ! Radious of bullet [m]
+energy=0.90d0,      ! Energy of bullet [J]
+g=9.80665d0,        ! Gravity [m s^-2]
+temperature=20d0,   ! Temperature [degree of Celsius]
+pressure=101325d0,  ! Atmospheric pressure [Pa]
+moisture=0.6d0,     ! Value of moisture 0~1
+omgdecay="yes",     ! Introduce omega decay. "yes" or "no"
+search_zeroin="yes", ! Search good vz and omgy. "yes" or "no"
+zeroinx=50d0,       !   +-- if yes, set zeroin length [m]
+search_updown="yes",! Search good vz and omgy. "yes" or "no"
+updownz=0.20d0,     !   +-- if yes, set up-down henght [m]
+theta=-1.7d0,
+rx=0.d0,
+ry=0.d0,  
+rz=1.0d0,
+vy=0.d0,
+ux=0.d0,
+uy=0.d0,
+uz=0.d0,
+omgx=0.d0, !*2pi
+omgy=-340d0, !*2pi
+omgz=0.d0, !*2pi
+outputfile="orbit", ! Output file name prefix
+stept=0.01d0,       ! Output interval [s]
+ik=0, ! ik=0 exact, ik=1 approximation
+&end
