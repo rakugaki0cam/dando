@@ -234,7 +234,7 @@ def rkfd(N, t, x, s, ik):
       # 3,4,5
       # 速度の変化=加速度(抵抗力による減速度)
       # d v_{x,y,z}/dt = F{x,y,z}
-      fn = (gravity(s - 3, m, g, r) + vis1(s - 3, relv, a, eta) + vis2(s - 3, relv, a, eta, rho) + mag(s - 3, omg, relv, a, rho)) / m
+      fn = (gravity(s - 3, m, g) + vis1(s - 3, relv, a, eta) + vis2(s - 3, relv, a, eta, rho) + mag(s - 3, omg, relv, a, rho)) / m
 
    elif s < 9:
       #6,7,8
@@ -278,10 +278,10 @@ def energy(m, x):
    return energy
 
 
-def gravity(dir, m, g, r):
+def gravity(dir, m, g):
    # 重力 -mg z軸方向のみ
-   # x,yではゼロ
-   if dir == 3:
+   # dir: 0,1,2 = x,y,z 
+   if dir == 2:
       gravity = -m * g
    else:
       gravity = 0
@@ -529,12 +529,12 @@ omgx = 0.0 * 2 * math.pi   # 回転数[rad/sec]　カーブ
 omgy = -200 * 2 * math.pi  # ホップ回転数[rad/sec] (rps)
 omgz = 0.0 * 2 * math.pi   # ライフリング[rad/sec]
 # 時間
-stept = 0.01            #計算時間刻み[sec]
-te = 10                 #終了時間[sec]
+stept = 0.001            #計算時間刻み[sec]
+te = 2                 #終了時間[sec]
 # 回転数減衰の計算方法
 ik = 0                  #0:積分計算　1:近似計算
 # 計算精度
-tol = 1e-8             #桁精度
+tol = 1e-6              #桁精度
 
 
 N = 12 #微分方程式の階数
@@ -575,11 +575,13 @@ for j in range(Nt + 1):
    if j % step == 0:          
       Ene = energy(m,x)
       Hop = -x[7] / 2 / math.pi
-      print("{:5.3f}[sec] x:{:6.3f}[m] z:{:6.3f}[m] vx:{:5.1f}[mps] ωy:{:6.1f}[rps] E:{:6.3f}[J]".format(t, x[0], x[2], x[3], Hop, Ene))
+      print("{:5.3f}[sec] x:{:7.3f}[m] z:{:6.3f}[m] vx:{:5.1f}[mps] ωy:{:6.1f}[rps] E:{:6.3f}[J]".format(t, x[0], x[2], x[3], Hop, Ene))
 
    #Stop calculation when bullet reach ground.
-   if x[3] < 0:
+   if x[2] < 0:   # z = x[2]
       print("Reach ground at ", t, "sec")
+      while 1:
+         exit
  
 
 
