@@ -565,6 +565,8 @@ print("# tolerance:", tol)
 print("  t[s]       x[m]         z[m]       vx[m/s]       wy[rot/s]      Energy[J]")
 
 info = 0
+gx = []
+gy = []
 
 for j in range(Nt + 1):
    t = time[j]
@@ -572,14 +574,26 @@ for j in range(Nt + 1):
    h = te - t
    t, x, _, info = rkf451_e(N, t, x, h, te, tol, ik)
 
+   gx.append(x[0])
+   gy.append(x[2])
+
    if j % step == 0:          
       Ene = energy(m,x)
       Hop = -x[7] / 2 / math.pi
-      print("{:5.3f}[sec] x:{:7.3f}[m] z:{:6.3f}[m] vx:{:5.1f}[mps] ωy:{:6.1f}[rps] E:{:6.3f}[J]".format(t, x[0], x[2], x[3], Hop, Ene))
+      print("{:5.3f}[sec] x:{:7.3f}[m] z:{:6.3f}[m] vx:{:5.1f}[m/s] ωy:{:6.1f}[rps] E:{:6.3f}[J]".format(t, x[0], x[2], x[3], Hop, Ene))
 
    #Stop calculation when bullet reach ground.
    if x[2] < 0:   # z = x[2]
       print("Reach ground at ", t, "sec")
+
+      plt.plot(gx, gy)
+      plt.xlabel('x')
+      plt.ylabel('z')
+      plt.show()
+
+
+
+
       while 1:
          exit
  
