@@ -58,13 +58,13 @@ def eta_air(T):
 
 
 
-def rkf451_e(x, y, h, xe):
+def rkf451_e(t, x, h, te):
    # ルンゲ・クッタ=フェールベルグ法
    # 刻み幅自動制御
-   # x:    変数
-   # y:    解
+   # t:    変数
+   # x:    解
    # h:    刻み幅
-   # xe:   変数終値
+   # te:   変数終値
    #帰り値
    #info = -2  異常　計算範囲をオーバー
    #     = -1  異常　刻み値が小さくなりすぎ　tolの再検討が必要
@@ -83,10 +83,10 @@ def rkf451_e(x, y, h, xe):
    if h < -hmax:
       h = -hmax    
     
-   if abs(x - xe) <= h:
-      h = xe - x
+   if abs(t - te) <= h:
+      h = te - t
 
-   if abs(x - xe) <= hmin:
+   if abs(t - te) <= hmin:
       info = 1
       flag = 1
       #return x, y, h, info
@@ -94,7 +94,7 @@ def rkf451_e(x, y, h, xe):
    #精度値の計算
    Sy = 0
    for n in range(N):
-      Sy += y[n] ** 2
+      Sy += x[n] ** 2
    Sy = math.sqrt(Sy)
    if Sy >= 1:
       err = tol * Sy
@@ -123,7 +123,7 @@ def rkf451_e(x, y, h, xe):
    while flag == 0:
       
       #係数Kの計算
-
+      """
       K1 = np.zeros(N)
       K2 = np.zeros(N)
       K3 = np.zeros(N)
@@ -146,20 +146,20 @@ def rkf451_e(x, y, h, xe):
          K5[n] = h * rkfd(tx0+      h, ty0, n )   #c[4]=1
          ty0[n] = y[n]+1/2*  K5[n]
          K6[n] = h * rkfd(tx0+1/2*  h, ty0, n )   #c[5]=1/2
-
+      """
 
 
 
       for s in range(S):
-         tx = x + c[s] * h
+         tx = t + c[s] * h
          for n in range(N):
             if s == 0:
-               ty[n] = y[n]      #c[s]がゼロでないときは成り立たない
+               ty[n] = x[n]      #c[s]がゼロでないときは成り立たない
             else:
-               ty[n] = y[n] + c[s] * K[n][s - 1]
+               ty[n] = x[n] + c[s] * K[n][s - 1]
          for n in range(N):      
             K[n][s] = h * rkfd(tx, ty, n)
-
+      print("t=",t, "h=",h, end=' ')##########################
       """
       #係数Kの計算 ~9/4
       for s in range(S):
@@ -198,10 +198,10 @@ def rkf451_e(x, y, h, xe):
          #y5[n] = y[n]
       if R <= err:
          #print('R計算回数', Rcnt)
-         x += h  
+         t += h  
          for n in range(N):
             for s in range(S):
-               y[n] += b[0][s] * K[n][s]   #4次
+               x[n] += b[0][s] * K[n][s]   #4次
                #y5[n] += b[1][s] * K[n][s] #5次　比較用
             #print('y4[{:1d}] ={:20.16f}  y5[{:1d}] ={:20.16f} 差={:20.16f}'.format(n, y[n], n, y5[n], y[n] - y5[n]))
          flag = 1
@@ -233,25 +233,35 @@ def rkf451_e(x, y, h, xe):
          h = -hmax
 
       #step 9
-      if abs(xe - x) <= abs(h):
+      if abs(te - t) <= abs(h):
          #hをx終端値に合わせる
-         h = xe - x
+         h = te - t
          if abs(h) <= hmin:
             info = 1
             flag = 1
 
       #計算が範囲外になっている場合
-      if h <= 0 and (xe - x) >= 0:
+      if h <= 0 and (te - t) >= 0:
          info = -2
          flag = 1
-      elif h > 0 and (xe - x) <= 0:
+      elif h > 0 and (te - t) <= 0:
          info = -2
          flag = 1
 
-   return x, y, h, info
+   print()###########################
+   return t, x, h, info
 
 
 def rkfd(t, x, n):
+   # 微分方程式
+   #  dx / dt = fn(t,x)
+   #
+   # t:  時刻
+   # x:  値
+   # n:  計算する階
+   # 戻り値
+   # fn: 解
+
    r   = np.zeros(3)    #位置 rx,ry,rz
    v   = np.zeros(3)    #速度 vx,vy,vz
    omg = np.zeros(3)    #回転数 ωx,ωy,ωz
@@ -268,7 +278,7 @@ def rkfd(t, x, n):
    #fn = 0#########
    if n < 3:
       # 0,1,2
-      # 位置の変化=速度（慣性力）
+      # 位置の変化=速度（等速運動）
       # d {x,y,z}/dt = v{x,y,z}
       fn = v[n]
 
@@ -559,8 +569,8 @@ omgx = 0.0 * 2 * math.pi   # 回転数[rad/sec]　カーブ
 omgy = -210 * 2 * math.pi  # ホップ回転数[rad/sec] (rps)
 omgz = 0.0 * 2 * math.pi   # ライフリング[rad/sec]
 # 時間
-stept = 0.001            #計算時間刻み[sec]
-te = 3                   #終了時間[sec]
+stept = 0.1            #計算時間刻み[sec]    # 0.001 ####################
+te = 5                   #終了時間[sec]   #### 3
 # 回転数減衰の計算方法
 ik = 0                  #0:積分計算　1:近似計算
 # 計算精度
@@ -580,7 +590,7 @@ time = np.zeros(Nt + 2)
 for i in range(Nt + 2):
    time[i] = i * stept
 
-step = 100  #表示周期 
+step = 10  #表示周期  100###############
 
 print("弾道計算")
 print("# m:        ", mBb * 1000, "[g]")
@@ -602,15 +612,18 @@ info = 0
 gx = []
 gz = []
 
+h = 0.001####
+t = 0#####
 for j in range(Nt + 1):
-   t = time[j]
-   te = time[j + 1]
-   h = te - t
-   t, x, _, info = rkf451_e(t, x, h, te)
+   #t = time[j]
+   #te = time[j + 1]
+   #h = te - t
+   t, x, h, info = rkf451_e(t, x, h, te)
+   time[j] = t
 
    gx.append(x[0])
    gz.append(x[2])
-
+   print(j, end =' ')
    if j % step == 0:          
       Ene = energy(x)
       Hop = -x[7] / 2 / math.pi
