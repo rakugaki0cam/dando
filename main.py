@@ -35,8 +35,7 @@ def rho_humid(T, P, H):
    # H : 湿度 [％RH]
 
    et = 6.1078 - 10 ** (7.5 * T / (T + 237.3))              # et[hPa]
-   et = 100 * et
-   et = H * et
+   et *= 100 * H
    #print("et ", et, "Pa")
    rhoair = 0.0034856447 * P / ( T + 273.15 - 0.670)        ##あとで調べる
    rho_humid = rhoair * (1 - 0.378 * et / P)
@@ -59,21 +58,20 @@ def eta_air(T):
 
 
 
-def rkf451_e(N, x, y, h, xe, tol, ik):
+def rkf451_e(x, y, h, xe):
    # ルンゲ・クッタ=フェールベルグ法
    # 刻み幅自動制御
-   # N:    方程式階数
    # x:    変数
    # y:    解
    # h:    刻み幅
-   # tol:  精度
+   # xe:   変数終値
    #帰り値
    #info = -2  異常　計算範囲をオーバー
    #     = -1  異常　刻み値が小さくなりすぎ　tolの再検討が必要
    #     =  0  正常計算進行中
    #     =  1  x終了値に到達し計算完了
 
-   #hのチェック
+   #h刻み値のチェック
    hmin = 1e-14
    hmax = 1
 
@@ -120,10 +118,50 @@ def rkf451_e(N, x, y, h, xe, tol, ik):
    R = np.zeros(N)
    #y5 = np.zeros(N)    #.astype(np.float64)
    #Rcnt = 0
-
+   
    #計算ループ
    while flag == 0:
+      
       #係数Kの計算
+
+      K1 = np.zeros(N)
+      K2 = np.zeros(N)
+      K3 = np.zeros(N)
+      K4 = np.zeros(N)
+      K5 = np.zeros(N)
+      K6 = np.zeros(N)
+      ty0 = np.zeros(N)
+      
+      for n in range(N):
+         tx0 = x
+         ty0[n] = y[n]
+         K1[n] = h * rkfd(tx0        , ty0, n)                #c[0]=0
+         ty0[n] = y[n]+1/4*  K1[n]
+         K2[n] = h * rkfd(tx0+1/4*  h, ty0, n )   #c[1]=1/4
+         ty0[n] = y[n]+3/8*  K2[n]
+         K3[n] = h * rkfd(tx0+3/8*  h, ty0, n )   #c[2]=3/8
+         ty0[n] = y[n]+12/13*K3[n]
+         K4[n] = h * rkfd(tx0+12/13*h, ty0, n )   #c[3]=12/13
+         ty0[n] = y[n]+      K4[n]
+         K5[n] = h * rkfd(tx0+      h, ty0, n )   #c[4]=1
+         ty0[n] = y[n]+1/2*  K5[n]
+         K6[n] = h * rkfd(tx0+1/2*  h, ty0, n )   #c[5]=1/2
+
+
+
+
+      for s in range(S):
+         tx = x + c[s] * h
+         for n in range(N):
+            if s == 0:
+               ty[n] = y[n]      #c[s]がゼロでないときは成り立たない
+            else:
+               ty[n] = y[n] + c[s] * K[n][s - 1]
+         for n in range(N):      
+            K[n][s] = h * rkfd(tx, ty, n)
+
+      """
+      #係数Kの計算 ~9/4
       for s in range(S):
          tx = x + c[s] * h
          for n in range(N):
@@ -131,12 +169,16 @@ def rkf451_e(N, x, y, h, xe, tol, ik):
                ty[n] = y[n]
             else:
                ty[n] = y[n] + c[s] * K[n][s - 1]
-
-         #fn = rkfd(N, tx, ty, n, ik)               ################## nのループで回す？
          for n in range(N):
-            #K[n][s] = h * fn[n]
-            K[n][s] = h * rkfd(N, tx, ty, n, ik)
-                
+            K[n][s] = h * rkfd(tx, ty, n)
+      """             
+
+
+
+
+
+
+
       #step 4
       #4次での解と5次での解の差を求める
       # R = |x(4次)-x(5次)| / hN
@@ -205,60 +247,65 @@ def rkf451_e(N, x, y, h, xe, tol, ik):
       elif h > 0 and (xe - x) <= 0:
          info = -2
          flag = 1
-        
-    
+
    return x, y, h, info
 
-def rkfd(N, t, x, s, ik):
-   r = np.zeros(3)      #位置 rx,ry,rz
-   v = np.zeros(3)      #速度 vx,vy,vz
+
+def rkfd(t, x, n):
+   r   = np.zeros(3)    #位置 rx,ry,rz
+   v   = np.zeros(3)    #速度 vx,vy,vz
    omg = np.zeros(3)    #回転数 ωx,ωy,ωz
-   u = np.zeros(3)      #風速 ux,uy,uz
+   u   = np.zeros(3)    #風速 ux,uy,uz
    relv = np.zeros(3)   #相対速度　風を考慮した速度
    
    for i in range(3):
-      r[i] = x[i]       #0,1,2
-      v[i] = x[3 + i]   #3,4,5
-      omg[i] = x[6 +i]  #6,7,8
-      u[i] = x[9 + i]   #9,10,11
+      r[i]   = x[i]        #0,1,2
+      v[i]   = x[3 + i]    #3,4,5
+      omg[i] = x[6 +i]     #6,7,8
+      u[i]   = x[9 + i]    #9,10,11
       relv[i] = v[i] - u[i]
  
-   fn = 0
-   if s < 3:
+   #fn = 0#########
+   if n < 3:
       # 0,1,2
       # 位置の変化=速度（慣性力）
       # d {x,y,z}/dt = v{x,y,z}
-      fn = v[s]
+      fn = v[n]
 
-   elif s < 6:
+   elif n < 6:
       # 3,4,5
       # 速度の変化=加速度(抵抗力による減速度)
       # d v_{x,y,z}/dt = F{x,y,z}
-      fn = (gravity(s - 3, m, g) + vis1(s - 3, relv, a, eta) + vis2(s - 3, relv, a, eta, rho) + mag(s - 3, omg, relv, a, rho)) / m
+      vn = n - 3  #v[n] = x[vn]
+      fn = (gravity(vn) + vis1(vn, relv) + vis2(vn, relv) + mag(vn, omg, relv)) / mBb
 
-   elif s < 9:
+   elif n < 9:
       #6,7,8
       # 回転角の変化（回転の減衰）
       # d omega{x,y,z}/dt = N_{x,y,z}/I
-      I = 0.4 * m * a ** 2
+      I = 0.4 * mBb * rBb ** 2
       nv = scalar(relv, 3)
       nw = scalar(omg, 3)
       if nw <= 1e-13:
          fn = 0
       else:
          if ik == 0:
-            fn = (Nz(nv, a, eta, rho, nw) / I) * x[s] / nw
+            #積分計算
+            fn = (Nz(nv, nw) / I) * x[n] / nw
          else:
-            fn = (Nze(nv, a, eta, rho, nw) / I) * x[s] / nw  
+            #近似計算
+            fn = (Nze(nv, nw) / I) * x[n] / nw  
 
    else:
       #9,10,11
-      # Differential equation for wind
+      # 風の計算
       # d u{x,y,z}/dt = Fu_{x,y,z}
       fn = 0
  
    return fn
 
+
+#-----------------------------
 def scalar(x, n):
    #スカラーを求める
    # x: ベクトル
@@ -269,72 +316,66 @@ def scalar(x, n):
    scalar = math.sqrt(sum)   
    return scalar   
 
-#-----------------------------
 
-def energy(m, x):
+def energy(x):
    #初速エネルギ
    # x[3,4,5] : vx,vy,vz
-   energy =  m * (x[3] ** 2 + x[4] ** 2 + x[5] ** 2) / 2
+   energy =  mBb * (x[3] ** 2 + x[4] ** 2 + x[5] ** 2) / 2
    return energy
 
 
-def gravity(dir, m, g):
+def gravity(dir):
    # 重力 -mg z軸方向のみ
    # dir: 0,1,2 = x,y,z 
    if dir == 2:
-      gravity = -m * g
+      gravity = -mBb * g
    else:
       gravity = 0
    return gravity
 
 
-def vis1(dir, v, r, eta):
+def vis1(dir, v):
    # 粘性抵抗分
-   vis1 = -6 * math.pi * eta * r * v[dir]
+   vis1 = -6 * math.pi * eta * rBb * v[dir]
    return vis1
 
 
-def vis2(dir, v, r, eta, rho):
-   #空気抵抗分
+def vis2(dir, v):
+   # 空気抵抗分
    nv = scalar(v, 3)
-   vis2 = -1 / 2 * Cd(Reynolds(nv, r, eta, rho)) * rho * math.pi * r ** 2 * nv * v[dir]
+   vis2 = -1 / 2 * Cd(Reynolds(nv, 2 * rBb)) * rho * math.pi * rBb ** 2 * nv * v[dir]
    return vis2
 
 
-def mag(dir, omg, v, r, rho):
+def mag(dir, omg, v):
    # 揚力分
-   L = np.zeros(3)
-
+   mag = 0
    nomg = scalar(omg, 3)
    if nomg < 1e-14:
-      mag = 0
       return mag
   
    nv = scalar(v, 3)
+   L = np.zeros(3)
    L[0] = v[1] * omg[2] - v[2] * omg[1]
    L[1] = v[2] * omg[0] - v[0] * omg[2]
    L[2] = v[0] * omg[1] - v[1] * omg[0]
    nL = scalar(L, 3)
    if nL < 1e-14:
-      mag = 0
       return mag
   
    Cl = 0.12   # 揚力係数
-   mag = -4 / 3 * Cl * math.pi * r ** 3 * 2 * rho * nomg * nv * L[dir] / nL
+   mag = - 4 / 3 * Cl * math.pi * rBb ** 3 * 2 * rho * nomg * nv * L[dir] / nL
    return mag
 
 
-def Reynolds(nv, r, eta, rho):
+def Reynolds(nv, d):
    #レイノルズ数
    # nv : norm of velocity of object
-   #  r : radius of object
-   #eta : viscosity (not Kinetic viscosity)
-   #rho : density of fluid
+   # d  : diameter
 
    #keta means Kinetic viscosity
    keta = eta / rho
-   Reynolds = nv * 2 * r / keta
- 
+   Reynolds = nv * d / keta
    return Reynolds
 
 
@@ -345,10 +386,7 @@ def Cd(Re):
    #Drag coefficient Cd,
    #Cd depend on Reynolds number,Re.
    #Fource of Drug,D is written by
-   #     1
-   # D= ---Cd*rho*pi*a**2*|V|**2
-   #     2
-   #        ^ This Cd#
+   # D = 1/2 Cd ρπ R^2 |V|^2
  
    c1 = 24 / Re
    c2 = Re / 5
@@ -362,65 +400,61 @@ def Cd(Re):
    return Cd
 
 
-def Nz(nv, r, eta, rho, omg):
+def Nz(nv, omg):
+   #積分計算
    #Moment of omg direction
-  
-   Nz = 0.5 * rho * Cf(nv, r, eta, rho) * r ** 3
-   Nz = Nz * Fintegral(nv, r, omg)
+   Nz = 1 / 2 * rho * Cf(nv) * rBb ** 3 * Fintegral(nv, omg)
    return Nz
 
 
-def Nze(nv, r, eta, rho, omg):
-
-   pc = math.pi / 5.32065  # magic phi
-   tc= math.pi / 3.60475   # magic theta
+def Nze(nv, omg):
+   #近似計算
+   pc = math.pi / 5.32065     # magic phi
+   tc = math.pi / 3.60475     # magic theta
   
-   vu = nv * math.sin(pc) - r * omg * math.sin(tc)
-   vd = -nv * math.sin(pc) - r * omg * math.sin(tc)
-   Nze = -0.5 * rho * Cf(nv, r, eta, rho)
-   Nze = Nze * (4 * math.pi * r ** 2) * r * 0.5
-   Nze = -Nze * (abs(vu) * vu + abs(vd) * vd)
+   vu = nv * math.sin(pc) - rBb * omg * math.sin(tc)
+   vd = -nv * math.sin(pc) - rBb * omg * math.sin(tc)
+   Nze = -0.5 * rho * Cf(nv)
+   Nze *= (4 * math.pi * rBb ** 2) * rBb * 0.5
+   Nze *= -(abs(vu) * vu + abs(vd) * vd)
   
    return Nze
 
-def Cf(nv, r, eta, rho):
-   # nv : norm of velocity of object
-   #  r : radius of object
-   #eta : viscosity (not Kinetic viscosity)
-   #rho : density of fluid
 
-   # 層流の時
-   Cf = 1.328 / math.sqrt(Reynolds(nv, r, eta, rho))
- 
+def Cf(nv):
+   #摩擦抗力係数
+   # nv : norm of velocity of object
+   
+   # 層流の時　Re < 5e+6
+   Cf = 1.328 / math.sqrt(Reynolds(nv, 2 * rBb))
    # 乱流の時 Re > 10^7
-   #Cf = 0.455 / (log10(Reynolds(nv, a, eta, rho))**(2.58))
- 
+   #Cf = 0.455 / (log10(Reynolds(nv))**(2.58))
    return Cf
 
 
-#-----------------------------------#####################
+### 積分計算　#####
 
-def Fintegral(u, R, omega):
+def Fintegral(u, omega):
+   #積分計算
    # 2016/07/23
-   #   2pi     pi
+   #   2π      π
    #  /       /
-   #  | dphi  | |u*sin(phi)-R*omega*sin(theta)|*{u*sin(phi)-R*omega*sin(theta)}*sin^2(theta) d theta
+   #  | dφ    |  |u sinφ - Rωsinθ| (u sinφ - Rωsinθ) sin^2 θ dθ
    #  /       /
    #  0      0
 
    xx = np.zeros(15)
    ww = np.zeros(15)
-
-   s = 0
+   ss = 0
    xx, ww = GaussKronrod15ab(0, math.pi)
    for i in range(15):
-      s += ww[i] * Fphi(u, R, omega, xx[i])
+      ss += ww[i] * Fphi(u, omega, xx[i])
   
    xx, ww = GaussKronrod15ab(math.pi, 2 * math.pi)
    for i in range(15):
-      s += ww[i] * Fphi(u, R, omega, xx[i])
+      ss += ww[i] * Fphi(u, omega, xx[i])
       
-   Fintegral = s  
+   Fintegral = ss  
  
    return Fintegral
 
@@ -428,10 +462,8 @@ def Fintegral(u, R, omega):
 def GaussKronrod15ab(a, b):
    #Gauss-Kronrod Quadrature Nodes and Weights
    #http://www.advanpix.com/2011/11/07/gauss-kronrod-quadrature-nodes-weights/
-  
    xx = np.zeros(15)
    ww = np.zeros(15)
-   
  
    xx[7] = 0
    xx[8] = 2.077849550078984676006894037732449e-1
@@ -463,17 +495,15 @@ def GaussKronrod15ab(a, b):
 
 
 #----------------------------------------
-def Fphi(u, R, omega, phi):
+def Fphi(u, omega, phi):
    # using analysis solution.
-   #
-   #   pi
-   #  /
-   #  | |u*sin(phi)-R*omega*sin(theta)|*{u*sin(phi)-R*omega*sin(theta)}*sin^2(theta) d theta
-   #  /
-   #  0
-   #
-  
-   a = (u / (R * omega)) * math.sin(phi)
+   #    π
+   #   /
+   #   |  |u sinφ - Rωsinθ| (u sinφ - Rωsinθ) sin^2 θ dθ
+   #   /
+   #   0
+ 
+   a = (u / (rBb * omega)) * math.sin(phi)
  
    if a <= 0:
       Fphi = -(0.5 * a * a * math.pi - 8 * a / 3 + 3 * math.pi / 8)
@@ -489,7 +519,7 @@ def Fphi(u, R, omega, phi):
       while 1:
          exit
 
-   Rw = R * omega
+   Rw = rBb * omega
    Fphi = Fphi * Rw * abs(Rw)
 
    return Fphi
@@ -500,9 +530,9 @@ def Fphi(u, R, omega, phi):
 #####  main ###################################
 
 # 諸元
-m = 0.25 * 1e-3         # BB弾質量[kg] (g)
-a = 5.95 / 2 * 1e-3     # BB弾半径[m]  (φmm)
-v0 = 90.0               # 初速[m/sec]
+mBb = 0.28 * 1e-3       # BB弾質量[kg] (g)
+rBb = 5.95 / 2 * 1e-3   # BB弾半径[m]  (φmm)
+v0 = 83.0               # 初速[m/sec]
 g = 9.80665             # 重力[m/sec^2]
 # 気象
 temp = 20.0             # 気温[°C]
@@ -526,11 +556,11 @@ vz = math.sqrt(v0 ** 2 - vy ** 2) * math.sin(math.pi * theta / 180)
                            # 鉛直方向の初速[m/sec]
 # 回転速度
 omgx = 0.0 * 2 * math.pi   # 回転数[rad/sec]　カーブ
-omgy = -200 * 2 * math.pi  # ホップ回転数[rad/sec] (rps)
+omgy = -210 * 2 * math.pi  # ホップ回転数[rad/sec] (rps)
 omgz = 0.0 * 2 * math.pi   # ライフリング[rad/sec]
 # 時間
 stept = 0.001            #計算時間刻み[sec]
-te = 2                 #終了時間[sec]
+te = 3                   #終了時間[sec]
 # 回転数減衰の計算方法
 ik = 0                  #0:積分計算　1:近似計算
 # 計算精度
@@ -542,43 +572,47 @@ N = 12 #微分方程式の階数
 eta = eta_air(temp)
 rho = rho_humid(temp, pres, humi)
  
-x = [rx, ry, rz, vx, vy, vz, omgx, omgy, omgz, ux, uy, uz]
-Ene = energy(m, x)
+x = [rx, ry, rz, vx, vy, vz, omgx, omgy, omgz, ux, uy, uz]  #v[0]~v[11]
+Ene = energy(x)
 
 Nt = int(te / stept)
 time = np.zeros(Nt + 2)
 for i in range(Nt + 2):
    time[i] = i * stept
 
-step = 100  #表示周期   
+step = 100  #表示周期 
+
 print("弾道計算")
-print("# m:        ", m * 1000, "[g]")
+print("# m:        ", mBb * 1000, "[g]")
 print("# g:        ", g, "[m/sec]")
-print("# dia:      ", 2 * a * 1000, "[mm]")
+print("# dia:      ", 2 * rBb * 1000, "[mm]")
 print("# temp:     ", temp, "[°C]")
 print("# humidity: ", humi * 100, "[%RH]")
 print("# press:    ", pres / 100, "[hPa]")
 print("# eta:      ", eta, "[kg/ms]")
 print("# rho:      ", rho, "[kg/m^3]")
 print("# tolerance:", tol)
+print("# v0:       ", v0,"[m/sec]")
+print("# Energy:   ", Ene,"[J]")
+
 
 print("  t[s]       x[m]         z[m]       vx[m/s]       wy[rot/s]      Energy[J]")
 
 info = 0
 gx = []
-gy = []
+gz = []
 
 for j in range(Nt + 1):
    t = time[j]
    te = time[j + 1]
    h = te - t
-   t, x, _, info = rkf451_e(N, t, x, h, te, tol, ik)
+   t, x, _, info = rkf451_e(t, x, h, te)
 
    gx.append(x[0])
-   gy.append(x[2])
+   gz.append(x[2])
 
    if j % step == 0:          
-      Ene = energy(m,x)
+      Ene = energy(x)
       Hop = -x[7] / 2 / math.pi
       print("{:5.3f}[sec] x:{:7.3f}[m] z:{:6.3f}[m] vx:{:5.1f}[m/s] ωy:{:6.1f}[rps] E:{:6.3f}[J]".format(t, x[0], x[2], x[3], Hop, Ene))
 
@@ -586,9 +620,17 @@ for j in range(Nt + 1):
    if x[2] < 0:   # z = x[2]
       print("Reach ground at ", t, "sec")
 
-      plt.plot(gx, gy)
-      plt.xlabel('x')
-      plt.ylabel('z')
+      
+      fig, ax = plt.subplots(figsize = (10, 4))
+
+      ax.plot(gx, gz)
+
+      ax.set_xlim(0, 50)
+      ax.set_ylim(0, 1.4)
+      plt.grid()
+      plt.xlabel('x  [m]')
+      plt.ylabel('z  [m]')
+
       plt.show()
 
 
