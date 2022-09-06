@@ -27,35 +27,32 @@ import matplotlib.pyplot as plt
 #tol = 1e-10       #桁精度
 
 
-
 def rho_humid(T, P, H):
    # ρ : 空気密度 [kg/m^3]
    # T : 気温 [°C]
-   # P : 気圧 [Pa] (1気圧 = 101325 Pa)
+   # P : 気圧 [Pa] (1気圧 = 1013.25 hPa)
    # H : 湿度 [％RH]
-
-   et = 6.1078 - 10 ** (7.5 * T / (T + 237.3))              # et[hPa]
-   et *= 100 * H
+   psT = 6.1078 * 10 ** (7.5 * T / (T + 237.3))              # 飽和水蒸気圧 psT[hPa]
+   psT *= 100 * H
    #print("et ", et, "Pa")
    rhoair = 0.0034856447 * P / ( T + 273.15 - 0.670)        ##あとで調べる
-   rho_humid = rhoair * (1 - 0.378 * et / P)
-
+   rho_humid = rhoair * (1 - 0.378 * psT / P)
+   #print(rho_humid)
    return rho_humid 
 
 
 def eta_air(T):
-   # η : 空気粘度　[kg/ms]
+   #サザーランドの式により粘性係数を求める
+   # η : 空気粘度　[Pa s]
    # T : 気温 [°C]
-
-   eta_air = 1.487e-6 * ((T + 273.15) ** 1.5) / ((T + 273.15) + 117)       ##あとで調べる
+   # 式も2つあり、値もいろいろある   20°C 1.82e-6 [Pa s]程度
+   eta_air = 1.487e-6 * ((T + 273.15) ** 1.5) / ((T + 273.15) + 117)
+   #print(eta_air)
    #eta_air = 1.458e-6 * ((T + 273.15) ** 1.5) / ((T + 273.15) + 110.4)
-
+   #print(eta_air)
+   #eta_air = 1.7894e-5 * ((T + 273.15)/288.15) ** 1.5 * ((288.15+110.4)/(T+273.15+110.4))
+   #print(eta_air)
    return eta_air
-
-#TEST-----------------------------------------------------------------
-#rho_humid(20,1013.25,60)
-#eta_air(20)
-
 
 
 def rkf451_e(t, x, h, te):
@@ -123,33 +120,6 @@ def rkf451_e(t, x, h, te):
    while flag == 0:
       
       #係数Kの計算
-      """
-      K1 = np.zeros(N)
-      K2 = np.zeros(N)
-      K3 = np.zeros(N)
-      K4 = np.zeros(N)
-      K5 = np.zeros(N)
-      K6 = np.zeros(N)
-      ty0 = np.zeros(N)
-      
-      for n in range(N):
-         tx0 = x
-         ty0[n] = y[n]
-         K1[n] = h * rkfd(tx0        , ty0, n)                #c[0]=0
-         ty0[n] = y[n]+1/4*  K1[n]
-         K2[n] = h * rkfd(tx0+1/4*  h, ty0, n )   #c[1]=1/4
-         ty0[n] = y[n]+3/8*  K2[n]
-         K3[n] = h * rkfd(tx0+3/8*  h, ty0, n )   #c[2]=3/8
-         ty0[n] = y[n]+12/13*K3[n]
-         K4[n] = h * rkfd(tx0+12/13*h, ty0, n )   #c[3]=12/13
-         ty0[n] = y[n]+      K4[n]
-         K5[n] = h * rkfd(tx0+      h, ty0, n )   #c[4]=1
-         ty0[n] = y[n]+1/2*  K5[n]
-         K6[n] = h * rkfd(tx0+1/2*  h, ty0, n )   #c[5]=1/2
-      """
-
-
-
       for s in range(S):
          tx = t + c[s] * h
          for n in range(N):
@@ -159,25 +129,7 @@ def rkf451_e(t, x, h, te):
                ty[n] = x[n] + c[s] * K[n][s - 1]
          for n in range(N):      
             K[n][s] = h * rkfd(tx, ty, n)
-      print("t=",t, "h=",h, end=' ')##########################
-      """
-      #係数Kの計算 ~9/4
-      for s in range(S):
-         tx = x + c[s] * h
-         for n in range(N):
-            if s == 0:
-               ty[n] = y[n]
-            else:
-               ty[n] = y[n] + c[s] * K[n][s - 1]
-         for n in range(N):
-            K[n][s] = h * rkfd(tx, ty, n)
-      """             
-
-
-
-
-
-
+      #print("t=",t, "h=",h, end=' ')
 
       #step 4
       #4次での解と5次での解の差を求める
@@ -248,7 +200,7 @@ def rkf451_e(t, x, h, te):
          info = -2
          flag = 1
 
-   print()###########################
+   #print()###########################
    return t, x, h, info
 
 
@@ -327,10 +279,10 @@ def scalar(x, n):
    return scalar   
 
 
-def energy(x):
+def energy(m, v):
    #初速エネルギ
-   # x[3,4,5] : vx,vy,vz
-   energy =  mBb * (x[3] ** 2 + x[4] ** 2 + x[5] ** 2) / 2
+   # v[x,y,z]: vx,vy,vz
+   energy =  m * (v[0] ** 2+ v[1] ** 2 + x[2] ** 2) / 2
    return energy
 
 
@@ -406,7 +358,9 @@ def Cd(Re):
    c4 = Re ** 0.8 / 461000
  
    Cd = c1 + c2 + c3 + c4
- 
+   #print("Cd :", Cd)
+   
+
    return Cd
 
 
@@ -427,7 +381,6 @@ def Nze(nv, omg):
    Nze = -0.5 * rho * Cf(nv)
    Nze *= (4 * math.pi * rBb ** 2) * rBb * 0.5
    Nze *= -(abs(vu) * vu + abs(vd) * vd)
-  
    return Nze
 
 
@@ -463,10 +416,8 @@ def Fintegral(u, omega):
    xx, ww = GaussKronrod15ab(math.pi, 2 * math.pi)
    for i in range(15):
       ss += ww[i] * Fphi(u, omega, xx[i])
-      
-   Fintegral = ss  
- 
-   return Fintegral
+       
+   return ss
 
 
 def GaussKronrod15ab(a, b):
@@ -530,9 +481,11 @@ def Fphi(u, omega, phi):
          exit
 
    Rw = rBb * omega
-   Fphi = Fphi * Rw * abs(Rw)
+   Fphi *= Rw * abs(Rw)
 
    return Fphi
+
+
 
 
 
@@ -558,23 +511,25 @@ theta = 0.0             # 射出角度[°]
 rx = 0.0                # 距離[m]
 ry = 0.0                # 左右[m]
 rz = 1.0                # 高さ[m]
+## マトまでの距離
+xTarget = 7.5              # 水平距離[m] 
 ## 初期速度[m/sec]
 vy = 0                     # 左右方向のブレ[m/sec]
 vx = math.sqrt(v0 ** 2 - vy ** 2) * math.cos(math.pi * theta / 180)
                            # 水平方向の初速[m/sec]
 vz = math.sqrt(v0 ** 2 - vy ** 2) * math.sin(math.pi * theta / 180)
                            # 鉛直方向の初速[m/sec]
-# 回転速度
-omgx = 0.0 * 2 * math.pi   # 回転数[rad/sec]　カーブ
-omgy = -210 * 2 * math.pi  # ホップ回転数[rad/sec] (rps)
-omgz = 0.0 * 2 * math.pi   # ライフリング[rad/sec]
+# 回転による周速度/r(半径)
+omgx = 0.0 * 2 * math.pi   # カーブ
+omgy = -210 * 2 * math.pi  # ホップ回転(rps)
+omgz = 0.0 * 2 * math.pi   # ライフリング
 # 時間
-stept = 0.1            #計算時間刻み[sec]    # 0.001 ####################
-te = 5                   #終了時間[sec]   #### 3
+stept = 0.001            #計算時間刻み[sec]    # 0.001 ####################
+te = 10                   #終了時間[sec]   #### 3
 # 回転数減衰の計算方法
 ik = 0                  #0:積分計算　1:近似計算
 # 計算精度
-tol = 1e-6              #桁精度
+tol = 1e-10             #桁精度
 
 
 N = 12 #微分方程式の階数
@@ -583,30 +538,46 @@ eta = eta_air(temp)
 rho = rho_humid(temp, pres, humi)
  
 x = [rx, ry, rz, vx, vy, vz, omgx, omgy, omgz, ux, uy, uz]  #v[0]~v[11]
-Ene = energy(x)
+
+v = [vx, vy, vz]
+Ene = energy(mBb, v)
 
 Nt = int(te / stept)
 time = np.zeros(Nt + 2)
 for i in range(Nt + 2):
    time[i] = i * stept
 
-step = 10  #表示周期  100###############
-
-print("弾道計算")
-print("# m:        ", mBb * 1000, "[g]")
-print("# g:        ", g, "[m/sec]")
-print("# dia:      ", 2 * rBb * 1000, "[mm]")
-print("# temp:     ", temp, "[°C]")
-print("# humidity: ", humi * 100, "[%RH]")
-print("# press:    ", pres / 100, "[hPa]")
-print("# eta:      ", eta, "[kg/ms]")
-print("# rho:      ", rho, "[kg/m^3]")
-print("# tolerance:", tol)
-print("# v0:       ", v0,"[m/sec]")
-print("# Energy:   ", Ene,"[J]")
-
+print("###########################################################################")
+print("# 弾道計算")
+print("# BB弾直径:   ", 2 * rBb * 1000, "[mm]")
+print("# BB弾質量:   ", mBb * 1000, "[g]")
+print("# 気温:      ", temp, "[°C]")
+print("# 湿度:      ", humi * 100, "[%RH]")
+print("# 気圧:      ", pres / 100, "[hPa]")
+print("# 重力:      ", g, "[m/sec^2]")
+print("# 空気密度:   ", rho, "[kg/m^3]")
+print("# 空気粘性率: ", eta, "[kg/ms]")
+print("# 初速:      ", v0, "[m/sec]")
+print("# エネルギ:   ", Ene, "[J]")
+print("# ホップ回転数:", abs(omgy / 2 / math.pi), "rps")
+print("# マト距離:    ", xTarget, "[m]")
+print("# 計算精度:    ", tol)
+print()
 
 print("  t[s]       x[m]         z[m]       vx[m/s]       wy[rot/s]      Energy[J]")
+
+
+def flightData(t, x):
+   v = [x[3], x[4], x[5]]         
+   Ene = energy(mBb, v)
+   Hop = -x[7] / 2 / math.pi
+   print("{:6.4f}sec   x:{:7.3f}m   z:{:6.3f}m   vx:{:6.2f}m/s   ωy:{:6.1f}rps   E:{:6.3f}J".format(t, x[0], x[2], x[3], Hop, Ene))
+
+def impactData(text, x):
+   ke = x[3] / x[5]
+   si = np.rad2deg(math.atan(1 / ke))         
+   print("   ^^----- {}  角度{:6.1f}° = 1/{:5.1f} (z/x) -----------------------------".format(text, si, abs(ke)))
+
 
 info = 0
 gx = []
@@ -614,6 +585,9 @@ gz = []
 
 h = 0.001####
 t = 0#####
+step = 100  #表示周期  100###############
+impFlag = 0
+
 for j in range(Nt + 1):
    #t = time[j]
    #te = time[j + 1]
@@ -623,34 +597,40 @@ for j in range(Nt + 1):
 
    gx.append(x[0])
    gz.append(x[2])
-   print(j, end =' ')
-   if j % step == 0:          
-      Ene = energy(x)
-      Hop = -x[7] / 2 / math.pi
-      print("{:5.3f}[sec] x:{:7.3f}[m] z:{:6.3f}[m] vx:{:5.1f}[m/s] ωy:{:6.1f}[rps] E:{:6.3f}[J]".format(t, x[0], x[2], x[3], Hop, Ene))
+   #print(j, end =' ')
+   
+   #着弾した時
+   if impFlag == 0 and x[0] >= xTarget:   # x = x[0]
+      #着弾距離に達した時に一度だけ表示
+      text = "マトへ着弾"
+      flightData(t, x)
+      impactData(text, x)
+      impFlag = 1
 
-   #Stop calculation when bullet reach ground.
-   if x[2] < 0:   # z = x[2]
-      print("Reach ground at ", t, "sec")
-
-      
-      fig, ax = plt.subplots(figsize = (10, 4))
-
-      ax.plot(gx, gz)
-
-      ax.set_xlim(0, 50)
-      ax.set_ylim(0, 1.4)
-      plt.grid()
-      plt.xlabel('x  [m]')
-      plt.ylabel('z  [m]')
-
-      plt.show()
+   #着地した時
+   if x[2] <= 0:   # z = x[2]
+      text = "地面に落下"
+      flightData(t, x)
+      impactData(text, x)
+      break
+   
+   if j % step == 0:
+      flightData(t, x)
 
 
+#グラフの表示
+fig, ax = plt.subplots(figsize = (10, 4))
 
+ax.plot(gx, gz)
+#ax.set_xlim(0, 50)
+#ax.set_ylim(0, 1.4)
+plt.grid()
+plt.xlabel('x  [m]')
+plt.ylabel('z  [m]')
+plt.show()
 
-      while 1:
-         exit
+while 1:
+   exit
  
 
 
