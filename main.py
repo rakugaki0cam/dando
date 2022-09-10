@@ -1,8 +1,16 @@
-# 弾道計算
+# 弾道計算プログラム
+#  
+#     BB弾の弾道を求める
+#     ホップ回転による揚力計算
+#     空気抵抗係数は補正して使用
+#
+#     追加　着弾までの時間を求める
 #
 #        2022/08/29
+#           カム
 #
 #  pythonへ移植
+#  
 #
 # original by
 # sikinote http://slpr.sakura.ne.jp/qp/
@@ -15,16 +23,61 @@ import math
 import matplotlib.pyplot as plt
 
 
-#パラメータ設定例
-# 1, tol=1e-10  => とても精密　計算は遅い                     
-# 2, tol=1e-6   => 十分に実用的な計算結果
-#
-#ルンゲクッタの計算精度　(tol は固定値)
+### 諸元 #####
+g = 9.80665             # 重力[m/sec^2]
+mBb = 0.28 * 1e-3       # BB弾質量[kg] (g)
+rBb = 5.95 / 2 * 1e-3   # BB弾半径[m]  (φmm)
+v0 = 80.0               # 初速[m/sec]
+hop = 200               # ホップ回転数[rps]
+## 気象
+temp = 25.0             # 気温[°C]
+pres = 1013.25 * 100    # 気圧[Pa]  (hPa)
+humi = 60.00 / 100      # 湿度[%]   (%RH)
+## マトまでの距離
+xTarget = 7.5           # 水平距離[m] 
+## 射出時の条件
+theta = 0.0             # 射出角度[°]
+## 風速
+vWind = 0.0             # 風速[m/s]
+dWind = 3               # 風向き[時計の短針]
+
+## 風速
+sWind = np.deg2rad(dWind * 30)   # 3時=90° 右から左、9時=270° 左から右、6時=180° 追い風、12時=360° 向かい風
+ux = -vWind * math.cos(sWind)    # 追い風-、向かい風+[m/sec]
+uy = -vWind * math.sin(sWind)    # 左からの風-、右からの風+[m/sec]
+uz = 0                           # 下から上への風+、上から下への風-[m/sec]
+## 初期位置
+rx = 0.0                # 距離[m]
+ry = 0.0                # 左右[m]
+rz = 1.0                # 高さ[m]
+## 初期速度
+vy = 0                     # 左右方向のブレ[m/sec]
+vx = math.sqrt(v0 ** 2 - vy ** 2) * math.cos(math.pi * theta / 180)
+                           # 水平方向の初速[m/sec]
+vz = math.sqrt(v0 ** 2 - vy ** 2) * math.sin(math.pi * theta / 180)
+                           # 鉛直方向の初速[m/sec]
+## 回転による周速度/r(半径)
+omgx = 0.0 * 2 * math.pi   # カーブ
+omgy = -hop * 2 * math.pi  # ホップ
+omgz = 0.0 * 2 * math.pi   # ライフリング
+
+## 空気抵抗係数のフィッティング式
+fCd = "Morrison"
+#fCd = "Clift&Gauvin"
+## 空気抵抗係数の実験補正値
+kCd = 1.0
+## 回転数減衰の計算方法
+ik = 0                     #0:積分計算　1:近似計算
+## 時間
+h = 0.001                  #計算時間刻み初期値[sec]
+te = 5.0                   #終了時間[sec]
+##ルンゲクッタの計算精度
 # 1e-2  < tol           : 粗い　計算は速い
 # 1e-10 < tol < 1e-2    : 普通
 # 1e-12 < tol < 1e-10   : 精密　計算は遅い
 #         tol < 1e-12   : 非推奨
-#tol = 1e-10       #桁精度
+tol = 1e-8
+
 
 
 def rho_humid(T, P, H):
@@ -55,45 +108,30 @@ def eta_air(T):
    return eta_air
 
 
-def rkf451_e(t, x, h, te):
+def rkf45(t, h, x, xe):
    # ルンゲ・クッタ=フェールベルグ法
    # 刻み幅自動制御
-   # t:    変数
-   # x:    解
-   # h:    刻み幅
-   # te:   変数終値
-   #帰り値
-   #info = -2  異常　計算範囲をオーバー
-   #     = -1  異常　刻み値が小さくなりすぎ　tolの再検討が必要
-   #     =  0  正常計算進行中
-   #     =  1  x終了値に到達し計算完了
+   # t:    時刻(+)
+   # x[]:  微分方程式の解
+   # h:    刻み幅(+)
+   # xe:   距離終点値
+   # 戻り値
+   # info = -2  異常　計算範囲をオーバー
+   #      = -1  異常　刻み値が小さくなりすぎ　tolの再検討が必要
+   #      =  0  正常計算進行中
+   #      =  1  xe終点に到達し、精度調整中
+   #      =  2  xe終点値に到達し計算完了
 
-   #h刻み値のチェック
-   hmin = 1e-14
-   hmax = 1
+   hMin = 1e-14
+   hMax = 1
 
    info = 0
-   flag = 0
-
-   if h > hmax:
-      h = hmax
-   if h < -hmax:
-      h = -hmax    
-    
-   if abs(t - te) <= h:
-      h = te - t
-
-   if abs(t - te) <= hmin:
-      info = 1
-      flag = 1
-      #return x, y, h, info
-
+   loopFlag = 1
+   
    #精度値の計算
-   Sy = 0
-   for n in range(N):
-      Sy += x[n] ** 2
-   Sy = math.sqrt(Sy)
-   if Sy >= 1:
+   #Sy = scalar(x, N)   ## すべての階について評価
+   Sy = scalar(x, 3)    ##距離だけを評価　{x,y,z} = {x[0],x[1],x[3]}
+   if Sy > 1:
       err = tol * Sy
    else:
       err = tol
@@ -109,107 +147,124 @@ def rkf451_e(t, x, h, te):
    #Rb = b[1] - b[0]
    Rb = (1/360, 0, -128/4275, -2197/75240, 1/50, 2/55)         # 検算用
 
-   ty = np.zeros(N)
-   fn = np.zeros(N)
+   x4 = np.zeros(N)
+   y4 = np.zeros(N)
+   y5 = np.zeros(N)
    K = np.zeros((N, S))
    R = np.zeros(N)
-   #y5 = np.zeros(N)    #.astype(np.float64)
-   #Rcnt = 0
-   
+   Rcnt = 0       #刻み幅をきめる時の回数
+   endCnt = 0     #終点位置繰り返しの回数
+
    #計算ループ
-   while flag == 0:
-      
+   while loopFlag == 1:
+      x4 = x[0:N]    #スタート値をコピー
       #係数Kの計算
       for s in range(S):
          tx = t + c[s] * h
          for n in range(N):
             if s == 0:
-               ty[n] = x[n]      #c[s]がゼロでないときは成り立たない
+               y4[n] = x[n]      #c[0]==0ではないときには成り立たない
             else:
-               ty[n] = x[n] + c[s] * K[n][s - 1]
+               y4[n] = x[n] + c[s] * K[n][s - 1]
          for n in range(N):      
-            K[n][s] = h * rkfd(tx, ty, n)
+            K[n][s] = h * rkfd(y4, n)
       #print("t=",t, "h=",h, end=' ')
 
-      #step 4
-      #4次での解と5次での解の差を求める
+      #4次での解と5次での解の差Rを求める
       # R = |x(4次)-x(5次)| / hN
       R = 0
       r = np.zeros(N)
-      for n in range(N):
+      #for n in range(N):        ##全ての階を対象にする
+      for n in range(0,3):       ###刻み幅修正計算の対象を位置だけにする
          for s in range(S):
             r[n] += Rb[s] * K[n][s]
          R += r[n] ** 2
-      R = abs(math.sqrt(R) / h / N)
-      #Rcnt += 1
-      #print('{:3d}回目 刻み幅:h ={:10.7f}  差:R ={:13.10f}'.format(Rcnt, h, R))
+      #R = abs(math.sqrt(R) / N / h)      ##全ての階を対象にする
+      R = abs(math.sqrt(R) / 3 / h)       ###刻み幅修正計算の対象を位置だけにする
+      #print("R:",r)
 
-      #step 5
-      #4次での解を計算
-      #for n in range(N):
-         #y5[n] = y[n]
+      if Rcnt >= 1:
+         print('刻み幅変更{:3d}回目  差:R ={:13.10f}  h ={:10.7f}'.format(Rcnt, R, h))
+         dummy = ""
+      Rcnt += 1
+
       if R <= err:
-         #print('R計算回数', Rcnt)
-         t += h  
+         #4次での微分方程式の解を計算
+         #for n in range(N):  ##5次の計算
+         #  y5[n] = y[n]
+         Rcnt = 0
+         t2 = t + h  
          for n in range(N):
             for s in range(S):
-               x[n] += b[0][s] * K[n][s]   #4次
+               x4[n] += b[0][s] * K[n][s]   #4次
                #y5[n] += b[1][s] * K[n][s] #5次　比較用
             #print('y4[{:1d}] ={:20.16f}  y5[{:1d}] ={:20.16f} 差={:20.16f}'.format(n, y[n], n, y5[n], y[n] - y5[n]))
-         flag = 1
 
-      #step 6
+         #終点を過ぎたかの判定
+         dx = xe - x4[0]
+         if dx <= 0:
+            #終点を過ぎた時
+            endCnt += 1
+            print("終点到達", endCnt, "回目     x=", x4[0],"  Δx=",dx, "   h:",h )
+            if abs(dx) < 0.0001:
+               # 距離誤差が0.1mm以下になったら終了
+               info = 2
+               loopFlag = 0
+               break
+            else:
+               # まだ誤差が大きい時は再計算
+               h *= 0.5    #刻み幅を狭くして再計算
+               loopFlag = 1
+               continue
+         elif endCnt > 0:
+            #刻み幅を変えて再計算した後、終点まで届かなくなった場合
+            #一度メインループへ戻り、データを表示させる
+            endCnt += 1
+            print("終点到達", endCnt, "回目     x=",x4[0],"  Δx=",dx, "   h:",h )
+            print("終点に届かなくなった")
+            h *= 1.5    #刻み幅を広くする
+            info = 1
+            loopFlag = 0
+            continue
+         else:
+            #終点に届いていない時
+            info = 0
+            loopFlag = 0
+            #刻み幅修正へすすむ
+      
+      #刻み幅hを修正  
       if R >= 1e-20:
          delta = (err / (2 * R)) ** (1 / 4)
+         if delta > 0.1:
+            #刻み幅を適正値に修正する
+            h *= delta
+         else:
+            #現在の刻み幅hは大きすぎるので1/10に
+            h *= 0.1
       else:
-         #Rがほぼ0の時
-         delta = 4
-      #print('delta =', delta)
+         #Rがほぼ0の時は刻み幅は小さすぎるので4倍に
+         h *= 4
+         
+      #刻み幅のチェック
+      if h > hMax:
+         #刻み幅がmaxを超えないように
+         h = hMax
+      if h < hMin:
+         #刻み幅が小さくなり過ぎた時は中断
+         #コンピュータの計算誤差に埋もれて正常に計算できなくなるため
+         info = -1
+         loopFlag = 0
 
-      #step 7
-      if delta <= 0.1:
-         #現在の刻み幅hは大きすぎるので1/10にする
-         h = 0.1 * h
-      elif delta >= 4:
-         #現在の刻み幅は小さすぎるので4倍する
-         h = 4 * h
-      else:
-         #刻み幅を適正値に修正する
-         h = delta * h
-
-      #step 8
-      #刻み幅がmaxを超えないように
-      if h > hmax:
-         h = hmax
-      if h < -hmax:
-         h = -hmax
-
-      #step 9
-      if abs(te - t) <= abs(h):
-         #hをx終端値に合わせる
-         h = te - t
-         if abs(h) <= hmin:
-            info = 1
-            flag = 1
-
-      #計算が範囲外になっている場合
-      if h <= 0 and (te - t) >= 0:
-         info = -2
-         flag = 1
-      elif h > 0 and (te - t) <= 0:
-         info = -2
-         flag = 1
-
-   #print()###########################
-   return t, x, h, info
+   return t2, x4, h, info
 
 
-def rkfd(t, x, n):
-   # 微分方程式
-   #  dx / dt = fn(t,x)
+def rkfd(x, n):
+   # 玉の運動方程式
+   #  微分方程式
+   #  dx/dt = fn(t,x)
    #
    # t:  時刻
-   # x:  値
+   # x[]:  値
    # n:  計算する階
    # 戻り値
    # fn: 解
@@ -225,9 +280,8 @@ def rkfd(t, x, n):
       v[i]   = x[3 + i]    #3,4,5
       omg[i] = x[6 +i]     #6,7,8
       u[i]   = x[9 + i]    #9,10,11
-      relv[i] = v[i] - u[i]
+      relv[i] = v[i] - u[i]   # 風がある時の相対速度
  
-   #fn = 0#########
    if n < 3:
       # 0,1,2
       # 位置の変化=速度（等速運動）
@@ -260,7 +314,7 @@ def rkfd(t, x, n):
 
    else:
       #9,10,11
-      # 風の計算
+      # 風の計算 = 相対速度
       # d u{x,y,z}/dt = Fu_{x,y,z}
       fn = 0
  
@@ -268,10 +322,10 @@ def rkfd(t, x, n):
 
 
 #-----------------------------
-def scalar(x, n):
+def scalar(x, n = 3):
    #スカラーを求める
    # x: ベクトル
-   # n: 次元=3
+   # n: 次元 (デフォルト: 3)
    sum = 0
    for i in range(n):
       sum += x[i] ** 2
@@ -282,7 +336,7 @@ def scalar(x, n):
 def energy(m, v):
    #初速エネルギ
    # v[x,y,z]: vx,vy,vz
-   energy =  m * (v[0] ** 2+ v[1] ** 2 + x[2] ** 2) / 2
+   energy =  m * (v[0] ** 2+ v[1] ** 2 + v[2] ** 2) / 2
    return energy
 
 
@@ -304,7 +358,7 @@ def vis1(dir, v):
 
 def vis2(dir, v):
    # 空気抵抗分
-   nv = scalar(v, 3)
+   nv = scalar(v)#####################
    vis2 = -1 / 2 * Cd(Reynolds(nv, 2 * rBb)) * rho * math.pi * rBb ** 2 * nv * v[dir]
    return vis2
 
@@ -343,23 +397,37 @@ def Reynolds(nv, d):
 
 def Cd(Re):
    #空気抵抗係数
-   # From
-   #http://www.chem.mtu.edu/~fmorriso/DataCorrelationForSphereDrag2013.pdf
-   #Drag coefficient Cd,
-   #Cd depend on Reynolds number,Re.
-   #Fource of Drug,D is written by
-   # D = 1/2 Cd ρπ R^2 |V|^2
- 
-   c1 = 24 / Re
-   c2 = Re / 5
-   c2 = 2.6 * c2 / (1 + c2 **1.52)
-   c3 = Re / 263000
-   c3 = 0.411 * c3 ** (-7.94) / (1 + c3 ** (-8))
-   c4 = Re ** 0.8 / 461000
- 
-   Cd = c1 + c2 + c3 + c4
-   #print("Cd :", Cd)
-   
+   # Re : レイノルズ数
+   # 空気抵抗力: F = 1/2 Cd ρπ R^2 |V|^2
+
+   if fCd == 'Morrison':
+      #空気抵抗係数　Morrisonの式
+      #乱流域を含めた広範囲な係数を求められる
+      #BB弾での領域Re=20000〜40000程度では少し小さめの値となっているよう
+      # From
+      #http://www.chem.mtu.edu/~fmorriso/DataCorrelationForSphereDrag2013.pdf  
+      c1 = 24 / Re
+      c2 = Re / 5
+      c2 = 2.6 * c2 / (1 + c2 **1.52)
+      c3 = Re / 263000
+      c3 = 0.411 * c3 ** (-7.94) / (1 + c3 ** (-8))
+      c4 = Re ** 0.8 / 461000
+      Cd = c1 + c2 + c3 + c4
+      #print("Morrison Cd :", Cd)
+
+   elif fCd == 'Clift&Gauvin':
+      #空気抵抗係数　　Clift and Gauvinの式
+      # 層流域に限定　Re<300000
+      # マッハ数  Ma = v/c 音速に対する比率　BB弾では0.3以下
+      # なので、マッハ数による補正無し
+      c1 = 24 / Re * (1 + 0.15 * Re ** 0.687)
+      c2 = 0.42 / (1 + 42500 * Re ** -1.16)
+      Cd = c1 + c2
+      #print("C&G Cd =",Cd)
+
+   # 補正値をかける
+   Cd = Cd * kCd
+   #print("Cd =", Cd, "k =",kCd)
 
    return Cd
 
@@ -492,120 +560,87 @@ def Fphi(u, omega, phi):
 
 #####  main ###################################
 
-# 諸元
-mBb = 0.28 * 1e-3       # BB弾質量[kg] (g)
-rBb = 5.95 / 2 * 1e-3   # BB弾半径[m]  (φmm)
-v0 = 83.0               # 初速[m/sec]
-g = 9.80665             # 重力[m/sec^2]
-# 気象
-temp = 20.0             # 気温[°C]
-pres = 1013.25 * 100    # 気圧[Pa]  (hPa)
-humi = 60.0 / 100       # 湿度[%]   (%RH)
-## 風速
-ux = 0                  # 追い風+、向かい風-[m/sec]
-uy = 0                  # 左からの風+、右からの風-[m/sec]
-uz = 0                  # 下から上への風+、上から下への風-[m/sec]
-#射出時の条件
-theta = 0.0             # 射出角度[°]
-## 初期位置
-rx = 0.0                # 距離[m]
-ry = 0.0                # 左右[m]
-rz = 1.0                # 高さ[m]
-## マトまでの距離
-xTarget = 7.5              # 水平距離[m] 
-## 初期速度[m/sec]
-vy = 0                     # 左右方向のブレ[m/sec]
-vx = math.sqrt(v0 ** 2 - vy ** 2) * math.cos(math.pi * theta / 180)
-                           # 水平方向の初速[m/sec]
-vz = math.sqrt(v0 ** 2 - vy ** 2) * math.sin(math.pi * theta / 180)
-                           # 鉛直方向の初速[m/sec]
-# 回転による周速度/r(半径)
-omgx = 0.0 * 2 * math.pi   # カーブ
-omgy = -210 * 2 * math.pi  # ホップ回転(rps)
-omgz = 0.0 * 2 * math.pi   # ライフリング
-# 時間
-stept = 0.001            #計算時間刻み[sec]    # 0.001 ####################
-te = 10                   #終了時間[sec]   #### 3
-# 回転数減衰の計算方法
-ik = 0                  #0:積分計算　1:近似計算
-# 計算精度
-tol = 1e-10             #桁精度
 
 
-N = 12 #微分方程式の階数
-
-eta = eta_air(temp)
-rho = rho_humid(temp, pres, humi)
- 
+N = 12   #微分方程式の階数
 x = [rx, ry, rz, vx, vy, vz, omgx, omgy, omgz, ux, uy, uz]  #v[0]~v[11]
-
 v = [vx, vy, vz]
 Ene = energy(mBb, v)
-
-Nt = int(te / stept)
-time = np.zeros(Nt + 2)
-for i in range(Nt + 2):
-   time[i] = i * stept
+eta = eta_air(temp)
+rho = rho_humid(temp, pres, humi)
 
 print("###########################################################################")
 print("# 弾道計算")
-print("# BB弾直径:   ", 2 * rBb * 1000, "[mm]")
-print("# BB弾質量:   ", mBb * 1000, "[g]")
-print("# 気温:      ", temp, "[°C]")
-print("# 湿度:      ", humi * 100, "[%RH]")
-print("# 気圧:      ", pres / 100, "[hPa]")
-print("# 重力:      ", g, "[m/sec^2]")
-print("# 空気密度:   ", rho, "[kg/m^3]")
-print("# 空気粘性率: ", eta, "[kg/ms]")
-print("# 初速:      ", v0, "[m/sec]")
-print("# エネルギ:   ", Ene, "[J]")
-print("# ホップ回転数:", abs(omgy / 2 / math.pi), "rps")
-print("# マト距離:    ", xTarget, "[m]")
-print("# 計算精度:    ", tol)
+#print("# BB弾直径:          {:5.3f} mm".format(2 * rBb * 1000))
+print("# BB弾質量:          {:5.3f} g".format(mBb * 1000))
+print("# 気温:              {:5.2f} °C".format(temp))
+print("# 湿度:              {:5.2f} %RH".format(humi * 100))
+print("# 気圧:            {:5.2f} hPa".format(pres / 100))
+#print("# 重力:              {:5.3f} m/sec^2".format(g))
+#print("# 空気密度:          {:5.3f} kg/m^3".format(rho))
+#print("# 空気粘性率:    {:.3e} kg/ms".format(eta))
+print("# 初速:             {:6.2f} m/sec".format(v0, "[]"))
+print("# エネルギ:          {:5.3f} J".format(Ene))
+print("# ホップ回転数:      {:5.1f} rps".format(abs(omgy / 2 / math.pi)))
+print("# マト距離:         {:5.3f} m".format(xTarget))
+print("# 計算精度:       {:.2e} ".format(tol))
+print("# 空気抵抗係数:   {} のフィッティング式による".format(fCd))
+print("# 空気抵抗補正:      {:5.3f} ".format(kCd))
 print()
+print("計算回数     時刻     水平距離    着弾高さ      玉速度   ホップ回転数   エネルギ   計算刻み幅")
+print("          t[msec]         x[m]      Δz[mm]     vx[m/s]      ωy[rps]        E[J]     Δt[msec]")
 
-print("  t[s]       x[m]         z[m]       vx[m/s]       wy[rot/s]      Energy[J]")
 
-
+##### 表示サブルーチン
 def flightData(t, x):
+   #飛翔中のデータ表示
+   #風のベクトル　まだ未反映
    v = [x[3], x[4], x[5]]         
    Ene = energy(mBb, v)
    Hop = -x[7] / 2 / math.pi
-   print("{:6.4f}sec   x:{:7.3f}m   z:{:6.3f}m   vx:{:6.2f}m/s   ωy:{:6.1f}rps   E:{:6.3f}J".format(t, x[0], x[2], x[3], Hop, Ene))
+   print("{:6d}  ".format(i), end = '')
+   print("{:9.3f}    {:9.4f}    {:+8.2f}      ".format(t * 1000, x[0], (x[2] - rz) * 1000), end = '')
+   print("{:6.2f}       {:6.1f}      {:6.3f}     ".format(x[3], Hop, Ene), end = '')
+   print("{:8.4f}".format(h * 1000))
+   return
+
 
 def impactData(text, x):
+   #着弾、落下時の角度表示
    ke = x[3] / x[5]
    si = np.rad2deg(math.atan(1 / ke))         
-   print("   ^^----- {}  角度{:6.1f}° = 1/{:5.1f} (z/x) -----------------------------".format(text, si, abs(ke)))
+   print("           ^^----- {}  角度{:6.1f}° = 1/{:5.1f} (z/x) -----------------------------".format(text, si, abs(ke)))
+   return
 
 
-info = 0
+#####
+time = []
+cal = []
 gx = []
 gz = []
 
-h = 0.001####
 t = 0#####
 step = 100  #表示周期  100###############
 impFlag = 0
 
-for j in range(Nt + 1):
-   #t = time[j]
-   #te = time[j + 1]
-   #h = te - t
-   t, x, h, info = rkf451_e(t, x, h, te)
-   time[j] = t
-
+for i in range(999999):
+   info = 0
+   t, x, h, info = rkf45(t, h, x, xTarget)
+   time.append(t)
+   cal.append(x[0:11])
+   #cal.append([x[0],x[1],x[2],x[3],x[4],x[5],x[6],x[7],x[8],x[9],x[10],x[11]]) 
    gx.append(x[0])
    gz.append(x[2])
-   #print(j, end =' ')
    
    #着弾した時
-   if impFlag == 0 and x[0] >= xTarget:   # x = x[0]
+   #if impFlag == 0 and x[0] >= xTarget:   # x = x[0]
+   if impFlag == 0 and info == 2:   # x = x[0]
       #着弾距離に達した時に一度だけ表示
       text = "マトへ着弾"
-      flightData(t, x)
+      flightData(t, cal[i])
       impactData(text, x)
       impFlag = 1
+      break             ########## 着地まで見るときはコメントアウトする
 
    #着地した時
    if x[2] <= 0:   # z = x[2]
@@ -614,8 +649,15 @@ for j in range(Nt + 1):
       impactData(text, x)
       break
    
-   if j % step == 0:
+   #データを表示
+   if i % step == 0 or info == 1:
+      #表示周期毎と終点精度調整中に表示
       flightData(t, x)
+
+   if t >= te:
+      #時間切れ
+      print("タイムオーバー")
+      break
 
 
 #グラフの表示
@@ -629,6 +671,7 @@ plt.xlabel('x  [m]')
 plt.ylabel('z  [m]')
 plt.show()
 
+print("stop")
 while 1:
    exit
  
