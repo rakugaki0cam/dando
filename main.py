@@ -34,14 +34,14 @@ temp = 25.0             # 気温[°C]
 pres = 1013.25 * 100    # 気圧[Pa]  (hPa)
 humi = 60.00 / 100      # 湿度[%]   (%RH)
 ## マトまでの距離
-xTarget = 7.5          # 水平距離[m] 
+xTarget = 7.51          # 水平距離[m] 
 ## 射出時の角度
 elevAngle = 0.0         # 射出時の上下角度[°] 仰角＋、俯角ー
 lrAngle   = 0.0         # 射出時の左右角度[°] 右＋、左ー
-tiltAngle = 0.0         # ホップの傾き 0:正常 右＋、左ー
+tiltAngle = 2.0         # ホップの傾き 0:正常 右＋、左ー
 ## 風速
 vWind = 0.0             # 風速[m/s]
-dWind = 3               # 風向き[時計の短針]
+dWind = 3               # 風向き[時]
 
 ## 風速
 sWind = np.deg2rad(dWind * 30)   # 3時=90° 右から左、9時=270° 左から右、6時=180° 追い風、12時=360° 向かい風
@@ -49,9 +49,9 @@ ux = -vWind * math.cos(sWind)    # 追い風-、向かい風+[m/sec]
 uy = -vWind * math.sin(sWind)    # 左からの風-、右からの風+[m/sec]
 uz = 0                           # 下から上への風+、上から下への風-[m/sec]
 ## 初期位置
-rx = 0.0                # 距離[m]
-ry = 0.0                # 左右[m]
-rz = 1.0                # 高さ[m]
+x0 = 0.0                # 距離[m]
+y0 = 0.0                # 左右[m]
+z0 = 1.0                # 高さ[m]
 ## 初期速度
 vy = 0                     # 左右方向のブレ[m/sec]
 vx = math.sqrt(v0 ** 2 - vy ** 2) * math.cos(math.pi * elevAngle / 180)
@@ -188,11 +188,16 @@ def rkf45(t, h, x, xe):
    # xe:   距離終点値
    #
    # 戻り値
-   # info = -2  異常　計算範囲をオーバー
+   # info = -2  異常　刻み幅が大きくなり過ぎ
    #      = -1  異常　刻み値が小さくなりすぎ　tolの再検討が必要
    #      =  0  正常計算進行中
    #      =  1  xe終点に到達し、精度調整中
    #      =  2  xe終点値に到達し計算完了
+
+   kai = 3        ## 刻み幅修正計算の対象を位置だけにする　{x,y,z} = {x[0],x[1],x[3]}
+   #kai = N       ## 全ての階を対象にする
+   deBug001 = 0   ## 刻み幅変更と終点検出のデバッグ値　 1:表示する、0:表示しない
+
    hMin = 1e-14
    hMax = 1
 
@@ -200,8 +205,7 @@ def rkf45(t, h, x, xe):
    loopFlag = 1
    
    #精度値の計算
-   #Sy = scalar(x, N)   ## すべての階について評価
-   Sy = scalar(x, 3)    ##距離だけを評価　{x,y,z} = {x[0],x[1],x[3]}
+   Sy = scalar(x, kai)
    if Sy > 1:
       err = tol * Sy
    else:
@@ -218,8 +222,7 @@ def rkf45(t, h, x, xe):
    #Rbは5次-4次　Rb = b[1] - b[0]
    Rb = (1/360, 0, -128/4275, -2197/75240, 1/50, 2/55)         #差
 
-   x4 = np.zeros(N)  # Nはグローバル　階数
-   f4 = np.zeros(N)
+   f4 = np.zeros(N)  # Nはグローバル　階数
    K = np.zeros((N, S))
    R = np.zeros(N)
    Rcnt = 0       #刻み幅をきめる時の回数
@@ -227,34 +230,28 @@ def rkf45(t, h, x, xe):
 
    #計算ループ
    while loopFlag == 1:
-      x4 = x[0:N]    #スタート値をコピー
+      x4 = np.copy(x)         #スタート値をコピー
       #係数Kの計算
       for s in range(S):
-         tx = t + c[s] * h       ###############いらないんだっけ???????
+         tx = t + c[s] * h    ###############いらないんだっけ???????
          for n in range(N):
             if s == 0:
-               f4[n] = x[n]      #c[0]==0ではないときには成り立たない
+               f4[n] = x[n]   #c[0]==0ではないときには成り立たない
             else:
                f4[n] = x[n] + c[s] * K[n][s - 1]
          for n in range(N):      
             K[n][s] = h * rkfd(tx, f4, n)
-      #print("t=",t, "h=",h, end=' ')
 
       #4次での解と5次での解の差Rを求める
       # R = |x(4次)-x(5次)| / hN
       R = 0
       r = np.zeros(N)
-
-      #kai = N  ## 全ての階を対象にする
-      kai = 3  ## 刻み幅修正計算の対象を位置だけにする
-      #for n in range(N):        
       for n in range(kai):       
          for s in range(S):
             r[n] += Rb[s] * K[n][s]
          R += r[n] ** 2
       R = abs(math.sqrt(R) / kai / h)
 
-      deBug001 = 0      ###### 刻み幅変更と終点検出のデバッグ用表示
       def kizami():
          if deBug001 == 1:
             print('刻み幅変更{:3d}回目  差:R ={:13.10f}  h ={:10.7f} sec'.format(Rcnt, R, h))
@@ -271,7 +268,6 @@ def rkf45(t, h, x, xe):
 
       if Rcnt >= 1:
          kizami()
-         
       Rcnt += 1
 
       if R <= err:
@@ -291,30 +287,27 @@ def rkf45(t, h, x, xe):
             if abs(dx) < 0.0001:
                # 距離誤差が0.1mm以下になったら終了
                info = 2
-               loopFlag = 0
                break
             else:
                # まだ誤差が大きい時は再計算
                h *= 0.5    #刻み幅を狭くして再計算
+               if h < hMin:
+                  info = -1   #エラー終了
+                  break
                loopFlag = 1
                continue
-         elif endCnt > 0:
-            #刻み幅を変えて再計算した後、終点まで届かなくなった場合
-            #一度メインループへ戻り、データを表示させる
+         elif endCnt == 0:
+            ##解の計算をしたけれど終点に届いていない時
+            loopFlag = 0   #続く刻み幅修正処理へ   
+         else:
+            #終点調整後、終点まで届かなくなった場合、一度メインループへ戻り、データを表示させる
             endCnt += 1
             shuten("終点に届かなくなった")
-            h *= 1.5    #刻み幅を広くする
+            h *= 1.5    #刻み幅を広くする（2倍するとひとつ前の刻み幅と同じになる）
             info = 1
-            loopFlag = 0
-            continue
-         else:
-            #終点に届いていない時
-            info = 0
-            loopFlag = 0
-            #刻み幅修正へすすむ
-      
+            break            
       #刻み幅hを修正  
-      if R >= 1e-20:
+      if R >= 1e-20:       #ゼロ割り算防止
          delta = (err / (2 * R)) ** (1 / 4)
          if delta > 0.1:
             #刻み幅を適正値に修正する
@@ -325,16 +318,13 @@ def rkf45(t, h, x, xe):
       else:
          #Rがほぼ0の時は刻み幅は小さすぎるので4倍に
          h *= 4
-         
       #刻み幅のチェック
       if h > hMax:
-         #刻み幅がmaxを超えないように
-         h = hMax
+         info = -2
+         break
       if h < hMin:
-         #刻み幅が小さくなり過ぎた時は中断
-         #コンピュータの計算誤差に埋もれて正常に計算できなくなるため
          info = -1
-         loopFlag = 0
+         break
 
    return t2, x4, h, info
 
@@ -576,10 +566,8 @@ def Fphi(u, omega, phi):
 
 #####  main ###################################
 
-
-
 N = 12   #微分方程式の階数
-x = [rx, ry, rz, vx, vy, vz, omgx, omgy, omgz, ux, uy, uz]  #v[0]~v[11]
+x = np.array([x0, y0, z0, vx, vy, vz, omgx, omgy, omgz, ux, uy, uz])
 v = [vx, vy, vz]
 Ene = energy(mBb, v)
 eta = eta_air(temp)
@@ -608,23 +596,23 @@ print()
 print("計算回数     時刻     水平距離    着弾高さ      玉速度   ホップ回転数   エネルギ   計算刻み幅", end = '')
 print("    左右位置  左右速度 カーブ回転")
 print("          t[msec]         x[m]      Δz[mm]     vx[m/s]      ωy[rps]        E[J]     Δt[msec]", end = '')
-print("        y[mm]   vy[m/s]   ωz[rps]")
+print("        y[mm]   vy[m/s]   ωz[rps]")      #　y　横方向
 
 
 ##### 表示サブルーチン
 def flightData():
    #飛翔中のデータ表示
-   #風のベクトル　まだ未反映
+   dz = (x[2] - z0) * 1000    #着弾高さ Δz[mm]
+   ymm = x[1] * 1000          #横へのブレ y[mm]
    v = [x[3], x[4], x[5]]         
    Ene = energy(mBb, v)
-   HopY = x[7] / 2 / math.pi    #通常ホップ
-   HopZ = x[8] / 2 / math.pi
+   HopY = x[7] / 2 / math.pi     #通常ホップ軸
+   HopZ = x[8] / 2 / math.pi     #傾きがある時
    print("{:6d}  ".format(i), end = '')
-   print("{:9.3f}    {:9.4f}    {:+8.2f}      ".format(t * 1000, x[0], (x[2] - rz) * 1000), end = '')
-   print("{:6.2f}       {:6.1f}      {:6.3f}     ".format(x[3], HopY, Ene), end = '')
-   print("{:8.4f}".format(h * 1000), end = '')
-   print("     {:+8.2f}    {:6.3f}    {:6.1f}".format(x[1] * 1000, x[4], HopZ))
-
+   print("{:9.3f}    {:9.4f}    {:+8.2f}      ".format(t * 1000, x[0], dz), end = '')
+   print("{:6.2f}       {:6.1f}      {:6.3f}     {:8.4f}".format(x[3], HopY, Ene, h * 1000), end = '')
+   #print("{:8.4f}".format(h * 1000), end = '')
+   print("     {:+8.2f}    {:6.3f}    {:6.1f}".format(ymm, x[4], HopZ))    #　y　横方向
    return
 
 
@@ -635,22 +623,24 @@ def impactData(text):
    #重力落下量
    tg = - 1 / 2 * g * t ** 2 * 1000    #[mm]
    #左右
-   if x[1] >= 0:
+   if x[1] > 0.000005:  #[m]
       lr = '右'
-   else:
+   elif x[1] < -0.000005:
       lr = '左'
+   else:
+      lr = ''
 
    print("           ^^----- {}  角度{:6.1f}° = 1/{:5.1f} (z/x) -----------------------------".format(text, si, abs(ke)))
-   print("                   重力落下量      {:+8.2f} mm    ホップアップ量{:+8.2f} mm     ".format(tg, (x[2] - rz) * 1000 - tg))
+   print("                   重力落下量      {:+8.2f} mm    ホップアップ量{:+8.2f} mm  空気抵抗を考慮していないのでボツ".format(tg, (x[2] - z0) * 1000 - tg))
    print("                   左右の着弾ズレ  {:+8.2f} mm {}".format(x[1] * 1000, lr))
    return
 
 
 #####
-time = []
-gx = []
-gy = []
-gz = []
+time = np.array([])
+gx = np.array([])
+gy = np.array([])
+gz = np.array([])
 
 t = 0#####
 step = 100  #表示周期  100###############
@@ -659,10 +649,15 @@ impFlag = 0
 for i in range(999999):
    info = 0
    t, x, h, info = rkf45(t, h, x, xTarget)
-   time.append(t)
-   gx.append(x[0])
-   gy.append(x[1])
-   gz.append(x[2])
+   if info < 0:
+      print("error stop")
+      while 1:
+         exit
+
+   time = np.append(time, t)
+   gx = np.append(gx, x[0])
+   gy = np.append(gy, x[1])
+   gz = np.append(gz, x[2])
    
    #着弾した時
    if impFlag == 0 and info == 2:   # x = x[0]
@@ -707,6 +702,7 @@ ax1.grid()
 #ax1.set_xlabel('距離  [m]')
 ax1.set_ylabel('高さ  [m]')
 
+gy = gy * 1000
 ax2.plot(gx, gy)
 #ax2.set_title("距離と左右")
 ax2.sharex(ax1)
@@ -715,7 +711,7 @@ ax2.sharex(ax1)
 ax2.invert_yaxis()
 ax2.grid()
 ax2.set_xlabel('距離  [m]')
-ax2.set_ylabel('左右  [m]')
+ax2.set_ylabel('左右  [mm]')
 plt.show()
 
 print("stop")
