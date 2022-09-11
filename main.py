@@ -7,7 +7,7 @@
 #     追加　着弾までの時間を求める
 #
 #        2022/08/29
-#           カム
+#           カムのらくがき帳
 #
 #  pythonへ移植
 #  
@@ -28,15 +28,17 @@ g = 9.80665             # 重力[m/sec^2]
 mBb = 0.28 * 1e-3       # BB弾質量[kg] (g)
 rBb = 5.95 / 2 * 1e-3   # BB弾半径[m]  (φmm)
 v0 = 80.0               # 初速[m/sec]
-hop = 200               # ホップ回転数[rps]
+hop = 00               # ホップ回転数[rps]
 ## 気象
 temp = 25.0             # 気温[°C]
 pres = 1013.25 * 100    # 気圧[Pa]  (hPa)
 humi = 60.00 / 100      # 湿度[%]   (%RH)
 ## マトまでの距離
-xTarget = 7.5           # 水平距離[m] 
-## 射出時の条件
-theta = 0.0             # 射出角度[°]
+xTarget = 7.5          # 水平距離[m] 
+## 射出時の角度
+elevAngle = 0.0         # 射出時の上下角度[°] 仰角＋、俯角ー
+lrAngle   = 0.0         # 射出時の左右角度[°] 右＋、左ー
+tiltAngle = 0.0         # ホップの傾き 0:正常 右＋、左ー
 ## 風速
 vWind = 0.0             # 風速[m/s]
 dWind = 3               # 風向き[時計の短針]
@@ -52,17 +54,17 @@ ry = 0.0                # 左右[m]
 rz = 1.0                # 高さ[m]
 ## 初期速度
 vy = 0                     # 左右方向のブレ[m/sec]
-vx = math.sqrt(v0 ** 2 - vy ** 2) * math.cos(math.pi * theta / 180)
+vx = math.sqrt(v0 ** 2 - vy ** 2) * math.cos(math.pi * elevAngle / 180)
                            # 水平方向の初速[m/sec]
-vz = math.sqrt(v0 ** 2 - vy ** 2) * math.sin(math.pi * theta / 180)
+vz = math.sqrt(v0 ** 2 - vy ** 2) * math.sin(math.pi * elevAngle / 180)
                            # 鉛直方向の初速[m/sec]
-## 回転による周速度/r(半径)
-omgx = 0.0 * 2 * math.pi   # カーブ
-omgy = -hop * 2 * math.pi  # ホップ
-omgz = 0.0 * 2 * math.pi   # ライフリング
+## 回転による周速度/r(半径)  ーー 軸の向き
+omgx =  0.0 * 2 * math.pi                                      # ライフリング
+omgy = -hop * math.cos(np.deg2rad(tiltAngle)) * 2 * math.pi    # ホップ       y軸まわりの回転
+omgz =  hop * math.sin(np.deg2rad(tiltAngle)) * 2 * math.pi    # カーブ
 
 ## 空気抵抗係数のフィッティング式
-fCd = "Morrison"
+CdMethod = "Morrison"
 #fCd = "Clift&Gauvin"
 ## 空気抵抗係数の実験補正値
 kCd = 1.0
@@ -108,20 +110,89 @@ def eta_air(T):
    return eta_air
 
 
+
+def rkfd(t, x, n):
+   # 玉の運動方程式
+   #  微分方程式
+   #  dx/dt = fn(t,x)
+   #
+   # t:  時刻
+   # x[]:  値
+   # n:  計算する階
+   # 戻り値
+   # fn: 解
+
+   p   = np.zeros(3)    #位置 rx,ry,rz
+   v   = np.zeros(3)    #速度 vx,vy,vz
+   omg = np.zeros(3)    #回転数 ωx,ωy,ωz
+   u   = np.zeros(3)    #風速 ux,uy,uz
+   relv = np.zeros(3)   #相対速度　風を考慮した速度
+   
+   for i in range(3):
+      p[i]   = x[i]        #0,1,2
+      v[i]   = x[3 + i]    #3,4,5
+      omg[i] = x[6 +i]     #6,7,8
+      u[i]   = x[9 + i]    #9,10,11
+      relv[i] = v[i] - u[i]   # 風がある時の相対速度
+ 
+   #呼び出し番号nによる処理式の区分け
+   if n < 3:
+      # 0,1,2
+      # 位置の変化=速度（等速運動）
+      # d {x,y,z}/dt = v{x,y,z}
+      fn = v[n]
+   elif n < 6:
+      # 3,4,5
+      # 速度の変化=加速度(抵抗力による減速度)
+      # d v_{x,y,z}/dt = F{x,y,z}
+      nn = n - 3    #v[n] = x[n-3]
+      Fg = fGr(nn)
+      Fa = fAirReg(nn, relv)
+      Fl = fMagnus(nn, omg, relv)
+      fn = (Fg + Fa + Fl) / mBb      
+   elif n < 9:
+      #6,7,8
+      # 回転速度の減衰
+      # d omega{x,y,z}/dt = N_{x,y,z}/I
+      omgS = scalar(omg, 3)
+      if omgS < 1e-13:
+         fn = 0
+      else:
+         I = 0.4 * mBb * rBb ** 2
+         vS = scalar(relv, 3)
+         if ik == 0:
+            #積分計算
+            fn = (Nz(vS, omgS) / I) * x[n] / omgS
+         else:
+            #(ik == 1)
+            #近似計算
+            fn = (Nze(vS, omgS) / I) * x[n] / omgS  
+   elif n < 12:
+      #9,10,11
+      # 風の計算 = 相対速度
+      # d u{x,y,z}/dt = Fu_{x,y,z}
+      fn = 0
+   else:
+      #error
+      fn = 0
+
+   return fn
+
+
 def rkf45(t, h, x, xe):
    # ルンゲ・クッタ=フェールベルグ法
    # 刻み幅自動制御
    # t:    時刻(+)
-   # x[]:  微分方程式の解
    # h:    刻み幅(+)
+   # x[]:  微分方程式の解
    # xe:   距離終点値
+   #
    # 戻り値
    # info = -2  異常　計算範囲をオーバー
    #      = -1  異常　刻み値が小さくなりすぎ　tolの再検討が必要
    #      =  0  正常計算進行中
    #      =  1  xe終点に到達し、精度調整中
    #      =  2  xe終点値に到達し計算完了
-
    hMin = 1e-14
    hMax = 1
 
@@ -144,12 +215,11 @@ def rkf45(t, h, x, xe):
    b[0] = (25/216, 0, 1408/2565, 2197/4104, -1/5, 0)           #4次
    b[1] = (16/135, 0, 6656/12825, 28561/56430, -9/50, 2/55)    #5次
    c = (0, 1/4, 3/8, 12/13, 1, 1/2)
-   #Rb = b[1] - b[0]
-   Rb = (1/360, 0, -128/4275, -2197/75240, 1/50, 2/55)         # 検算用
+   #Rbは5次-4次　Rb = b[1] - b[0]
+   Rb = (1/360, 0, -128/4275, -2197/75240, 1/50, 2/55)         #差
 
-   x4 = np.zeros(N)
-   y4 = np.zeros(N)
-   y5 = np.zeros(N)
+   x4 = np.zeros(N)  # Nはグローバル　階数
+   f4 = np.zeros(N)
    K = np.zeros((N, S))
    R = np.zeros(N)
    Rcnt = 0       #刻み幅をきめる時の回数
@@ -160,52 +230,64 @@ def rkf45(t, h, x, xe):
       x4 = x[0:N]    #スタート値をコピー
       #係数Kの計算
       for s in range(S):
-         tx = t + c[s] * h
+         tx = t + c[s] * h       ###############いらないんだっけ???????
          for n in range(N):
             if s == 0:
-               y4[n] = x[n]      #c[0]==0ではないときには成り立たない
+               f4[n] = x[n]      #c[0]==0ではないときには成り立たない
             else:
-               y4[n] = x[n] + c[s] * K[n][s - 1]
+               f4[n] = x[n] + c[s] * K[n][s - 1]
          for n in range(N):      
-            K[n][s] = h * rkfd(y4, n)
+            K[n][s] = h * rkfd(tx, f4, n)
       #print("t=",t, "h=",h, end=' ')
 
       #4次での解と5次での解の差Rを求める
       # R = |x(4次)-x(5次)| / hN
       R = 0
       r = np.zeros(N)
-      #for n in range(N):        ##全ての階を対象にする
-      for n in range(0,3):       ###刻み幅修正計算の対象を位置だけにする
+
+      #kai = N  ## 全ての階を対象にする
+      kai = 3  ## 刻み幅修正計算の対象を位置だけにする
+      #for n in range(N):        
+      for n in range(kai):       
          for s in range(S):
             r[n] += Rb[s] * K[n][s]
          R += r[n] ** 2
-      #R = abs(math.sqrt(R) / N / h)      ##全ての階を対象にする
-      R = abs(math.sqrt(R) / 3 / h)       ###刻み幅修正計算の対象を位置だけにする
-      #print("R:",r)
+      R = abs(math.sqrt(R) / kai / h)
+
+      deBug001 = 0      ###### 刻み幅変更と終点検出のデバッグ用表示
+      def kizami():
+         if deBug001 == 1:
+            print('刻み幅変更{:3d}回目  差:R ={:13.10f}  h ={:10.7f} sec'.format(Rcnt, R, h))
+         return
+
+      def shuten(text = ''):
+         if deBug001 == 1:
+            print('終点に到達{:2d}回目  x ={:9.4f}    Δx = {:5.2f} mm     h ={:7.4f} ms  '.format(endCnt, x4[0], dx * 1000, h * 1000), end = '')
+            if text != '':
+               print(text)
+            else:
+               print()
+         return
 
       if Rcnt >= 1:
-         print('刻み幅変更{:3d}回目  差:R ={:13.10f}  h ={:10.7f}'.format(Rcnt, R, h))
-         dummy = ""
+         kizami()
+         
       Rcnt += 1
 
       if R <= err:
          #4次での微分方程式の解を計算
-         #for n in range(N):  ##5次の計算
-         #  y5[n] = y[n]
          Rcnt = 0
          t2 = t + h  
          for n in range(N):
             for s in range(S):
-               x4[n] += b[0][s] * K[n][s]   #4次
-               #y5[n] += b[1][s] * K[n][s] #5次　比較用
-            #print('y4[{:1d}] ={:20.16f}  y5[{:1d}] ={:20.16f} 差={:20.16f}'.format(n, y[n], n, y5[n], y[n] - y5[n]))
+               x4[n] += b[0][s] * K[n][s]    #4次
 
-         #終点を過ぎたかの判定
+         #水平距離が終点を過ぎたかの判定
          dx = xe - x4[0]
          if dx <= 0:
             #終点を過ぎた時
             endCnt += 1
-            print("終点到達", endCnt, "回目     x=", x4[0],"  Δx=",dx, "   h:",h )
+            shuten()
             if abs(dx) < 0.0001:
                # 距離誤差が0.1mm以下になったら終了
                info = 2
@@ -220,8 +302,7 @@ def rkf45(t, h, x, xe):
             #刻み幅を変えて再計算した後、終点まで届かなくなった場合
             #一度メインループへ戻り、データを表示させる
             endCnt += 1
-            print("終点到達", endCnt, "回目     x=",x4[0],"  Δx=",dx, "   h:",h )
-            print("終点に届かなくなった")
+            shuten("終点に届かなくなった")
             h *= 1.5    #刻み幅を広くする
             info = 1
             loopFlag = 0
@@ -258,68 +339,6 @@ def rkf45(t, h, x, xe):
    return t2, x4, h, info
 
 
-def rkfd(x, n):
-   # 玉の運動方程式
-   #  微分方程式
-   #  dx/dt = fn(t,x)
-   #
-   # t:  時刻
-   # x[]:  値
-   # n:  計算する階
-   # 戻り値
-   # fn: 解
-
-   r   = np.zeros(3)    #位置 rx,ry,rz
-   v   = np.zeros(3)    #速度 vx,vy,vz
-   omg = np.zeros(3)    #回転数 ωx,ωy,ωz
-   u   = np.zeros(3)    #風速 ux,uy,uz
-   relv = np.zeros(3)   #相対速度　風を考慮した速度
-   
-   for i in range(3):
-      r[i]   = x[i]        #0,1,2
-      v[i]   = x[3 + i]    #3,4,5
-      omg[i] = x[6 +i]     #6,7,8
-      u[i]   = x[9 + i]    #9,10,11
-      relv[i] = v[i] - u[i]   # 風がある時の相対速度
- 
-   if n < 3:
-      # 0,1,2
-      # 位置の変化=速度（等速運動）
-      # d {x,y,z}/dt = v{x,y,z}
-      fn = v[n]
-
-   elif n < 6:
-      # 3,4,5
-      # 速度の変化=加速度(抵抗力による減速度)
-      # d v_{x,y,z}/dt = F{x,y,z}
-      vn = n - 3  #v[n] = x[vn]
-      fn = (gravity(vn) + vis1(vn, relv) + vis2(vn, relv) + mag(vn, omg, relv)) / mBb
-
-   elif n < 9:
-      #6,7,8
-      # 回転角の変化（回転の減衰）
-      # d omega{x,y,z}/dt = N_{x,y,z}/I
-      I = 0.4 * mBb * rBb ** 2
-      nv = scalar(relv, 3)
-      nw = scalar(omg, 3)
-      if nw <= 1e-13:
-         fn = 0
-      else:
-         if ik == 0:
-            #積分計算
-            fn = (Nz(nv, nw) / I) * x[n] / nw
-         else:
-            #近似計算
-            fn = (Nze(nv, nw) / I) * x[n] / nw  
-
-   else:
-      #9,10,11
-      # 風の計算 = 相対速度
-      # d u{x,y,z}/dt = Fu_{x,y,z}
-      fn = 0
- 
-   return fn
-
 
 #-----------------------------
 def scalar(x, n = 3):
@@ -340,59 +359,56 @@ def energy(m, v):
    return energy
 
 
-def gravity(dir):
+def fGr(dir):
    # 重力 -mg z軸方向のみ
    # dir: 0,1,2 = x,y,z 
    if dir == 2:
-      gravity = -mBb * g
+      Fgravity = -mBb * g
    else:
-      gravity = 0
-   return gravity
+      Fgravity = 0
+   return Fgravity
 
 
-def vis1(dir, v):
-   # 粘性抵抗分
-   vis1 = -6 * math.pi * eta * rBb * v[dir]
-   return vis1
+def fAirReg(dir, v):
+   # 空気抵抗力
+   # 粘性抵抗分も含まれる
+   # dir: 0,1,2 = x,y,z 
+   # v[dir] = vx,vy,vz
+   vS = scalar(v)
+   Fairregistance = -1 / 2 * Cd(reynoldsNum(vS, 2 * rBb)) * rho * math.pi * rBb ** 2 * vS * v[dir]
+   return Fairregistance
 
 
-def vis2(dir, v):
-   # 空気抵抗分
-   nv = scalar(v)#####################
-   vis2 = -1 / 2 * Cd(Reynolds(nv, 2 * rBb)) * rho * math.pi * rBb ** 2 * nv * v[dir]
-   return vis2
-
-
-def mag(dir, omg, v):
+def fMagnus(dir, omg, v):
    # 揚力分
-   mag = 0
-   nomg = scalar(omg, 3)
-   if nomg < 1e-14:
-      return mag
+   Fmagnus = 0
+   omgS = scalar(omg, 3)
+   if omgS < 1e-14:
+      return Fmagnus
   
-   nv = scalar(v, 3)
-   L = np.zeros(3)
-   L[0] = v[1] * omg[2] - v[2] * omg[1]
-   L[1] = v[2] * omg[0] - v[0] * omg[2]
-   L[2] = v[0] * omg[1] - v[1] * omg[0]
-   nL = scalar(L, 3)
-   if nL < 1e-14:
-      return mag
+   vS = scalar(v, 3)
+   l = np.zeros(3)
+   l[0] = v[1] * omg[2] - v[2] * omg[1]
+   l[1] = v[2] * omg[0] - v[0] * omg[2]
+   l[2] = v[0] * omg[1] - v[1] * omg[0]
+   lS = scalar(l, 3)
+   if lS < 1e-14:
+      return Fmagnus
   
    Cl = 0.12   # 揚力係数
-   mag = - 4 / 3 * Cl * math.pi * rBb ** 3 * 2 * rho * nomg * nv * L[dir] / nL
-   return mag
+   Fmagnus = - 4 / 3 * Cl * math.pi * rBb ** 3 * 2 * rho * omgS * vS * l[dir] / lS
+   return Fmagnus
 
 
-def Reynolds(nv, d):
+def reynoldsNum(vS, d):
    #レイノルズ数
    # nv : norm of velocity of object
    # d  : diameter
 
    #keta means Kinetic viscosity
    keta = eta / rho
-   Reynolds = nv * d / keta
-   return Reynolds
+   reynoldsNumber = vS * d / keta
+   return reynoldsNumber
 
 
 def Cd(Re):
@@ -400,7 +416,7 @@ def Cd(Re):
    # Re : レイノルズ数
    # 空気抵抗力: F = 1/2 Cd ρπ R^2 |V|^2
 
-   if fCd == 'Morrison':
+   if CdMethod == 'Morrison':
       #空気抵抗係数　Morrisonの式
       #乱流域を含めた広範囲な係数を求められる
       #BB弾での領域Re=20000〜40000程度では少し小さめの値となっているよう
@@ -415,7 +431,7 @@ def Cd(Re):
       Cd = c1 + c2 + c3 + c4
       #print("Morrison Cd :", Cd)
 
-   elif fCd == 'Clift&Gauvin':
+   elif CdMethod == 'Clift&Gauvin':
       #空気抵抗係数　　Clift and Gauvinの式
       # 層流域に限定　Re<300000
       # マッハ数  Ma = v/c 音速に対する比率　BB弾では0.3以下
@@ -432,32 +448,32 @@ def Cd(Re):
    return Cd
 
 
-def Nz(nv, omg):
+def Nz(vS, omg):
    #積分計算
    #Moment of omg direction
-   Nz = 1 / 2 * rho * Cf(nv) * rBb ** 3 * Fintegral(nv, omg)
+   Nz = 1 / 2 * rho * Cf(vS) * rBb ** 3 * Fintegral(vS, omg)
    return Nz
 
 
-def Nze(nv, omg):
+def Nze(vS, omg):
    #近似計算
    pc = math.pi / 5.32065     # magic phi
    tc = math.pi / 3.60475     # magic theta
   
-   vu = nv * math.sin(pc) - rBb * omg * math.sin(tc)
-   vd = -nv * math.sin(pc) - rBb * omg * math.sin(tc)
-   Nze = -0.5 * rho * Cf(nv)
+   vu = vS * math.sin(pc) - rBb * omg * math.sin(tc)
+   vd = -vS * math.sin(pc) - rBb * omg * math.sin(tc)
+   Nze = -0.5 * rho * Cf(vS)
    Nze *= (4 * math.pi * rBb ** 2) * rBb * 0.5
    Nze *= -(abs(vu) * vu + abs(vd) * vd)
    return Nze
 
 
-def Cf(nv):
+def Cf(vS):
    #摩擦抗力係数
    # nv : norm of velocity of object
    
    # 層流の時　Re < 5e+6
-   Cf = 1.328 / math.sqrt(Reynolds(nv, 2 * rBb))
+   Cf = 1.328 / math.sqrt(reynoldsNum(vS, 2 * rBb))
    # 乱流の時 Re > 10^7
    #Cf = 0.455 / (log10(Reynolds(nv))**(2.58))
    return Cf
@@ -582,41 +598,58 @@ print("# 気圧:            {:5.2f} hPa".format(pres / 100))
 print("# 初速:             {:6.2f} m/sec".format(v0, "[]"))
 print("# エネルギ:          {:5.3f} J".format(Ene))
 print("# ホップ回転数:      {:5.1f} rps".format(abs(omgy / 2 / math.pi)))
-print("# マト距離:         {:5.3f} m".format(xTarget))
+print("# 射出仰俯角:      {:+7.2f} °".format(elevAngle))
+print("# ホップ傾斜角:    {:+7.2f} °".format(tiltAngle))
+print("# マト距離:          {:5.3f} m".format(xTarget))
 print("# 計算精度:       {:.2e} ".format(tol))
-print("# 空気抵抗係数:   {} のフィッティング式による".format(fCd))
+print("# 空気抵抗係数:   {} のフィッティング式による".format(CdMethod))
 print("# 空気抵抗補正:      {:5.3f} ".format(kCd))
 print()
-print("計算回数     時刻     水平距離    着弾高さ      玉速度   ホップ回転数   エネルギ   計算刻み幅")
-print("          t[msec]         x[m]      Δz[mm]     vx[m/s]      ωy[rps]        E[J]     Δt[msec]")
+print("計算回数     時刻     水平距離    着弾高さ      玉速度   ホップ回転数   エネルギ   計算刻み幅", end = '')
+print("    左右位置  左右速度 カーブ回転")
+print("          t[msec]         x[m]      Δz[mm]     vx[m/s]      ωy[rps]        E[J]     Δt[msec]", end = '')
+print("        y[mm]   vy[m/s]   ωz[rps]")
 
 
 ##### 表示サブルーチン
-def flightData(t, x):
+def flightData():
    #飛翔中のデータ表示
    #風のベクトル　まだ未反映
    v = [x[3], x[4], x[5]]         
    Ene = energy(mBb, v)
-   Hop = -x[7] / 2 / math.pi
+   HopY = x[7] / 2 / math.pi    #通常ホップ
+   HopZ = x[8] / 2 / math.pi
    print("{:6d}  ".format(i), end = '')
    print("{:9.3f}    {:9.4f}    {:+8.2f}      ".format(t * 1000, x[0], (x[2] - rz) * 1000), end = '')
-   print("{:6.2f}       {:6.1f}      {:6.3f}     ".format(x[3], Hop, Ene), end = '')
-   print("{:8.4f}".format(h * 1000))
+   print("{:6.2f}       {:6.1f}      {:6.3f}     ".format(x[3], HopY, Ene), end = '')
+   print("{:8.4f}".format(h * 1000), end = '')
+   print("     {:+8.2f}    {:6.3f}    {:6.1f}".format(x[1] * 1000, x[4], HopZ))
+
    return
 
 
-def impactData(text, x):
-   #着弾、落下時の角度表示
+def impactData(text):
+   #着弾、落下時の角度
    ke = x[3] / x[5]
-   si = np.rad2deg(math.atan(1 / ke))         
+   si = np.rad2deg(math.atan(1 / ke))
+   #重力落下量
+   tg = - 1 / 2 * g * t ** 2 * 1000    #[mm]
+   #左右
+   if x[1] >= 0:
+      lr = '右'
+   else:
+      lr = '左'
+
    print("           ^^----- {}  角度{:6.1f}° = 1/{:5.1f} (z/x) -----------------------------".format(text, si, abs(ke)))
+   print("                   重力落下量      {:+8.2f} mm    ホップアップ量{:+8.2f} mm     ".format(tg, (x[2] - rz) * 1000 - tg))
+   print("                   左右の着弾ズレ  {:+8.2f} mm {}".format(x[1] * 1000, lr))
    return
 
 
 #####
 time = []
-cal = []
 gx = []
+gy = []
 gz = []
 
 t = 0#####
@@ -627,32 +660,30 @@ for i in range(999999):
    info = 0
    t, x, h, info = rkf45(t, h, x, xTarget)
    time.append(t)
-   cal.append(x[0:11])
-   #cal.append([x[0],x[1],x[2],x[3],x[4],x[5],x[6],x[7],x[8],x[9],x[10],x[11]]) 
    gx.append(x[0])
+   gy.append(x[1])
    gz.append(x[2])
    
    #着弾した時
-   #if impFlag == 0 and x[0] >= xTarget:   # x = x[0]
    if impFlag == 0 and info == 2:   # x = x[0]
       #着弾距離に達した時に一度だけ表示
       text = "マトへ着弾"
-      flightData(t, cal[i])
-      impactData(text, x)
+      flightData()
+      impactData(text)
       impFlag = 1
       break             ########## 着地まで見るときはコメントアウトする
 
    #着地した時
    if x[2] <= 0:   # z = x[2]
       text = "地面に落下"
-      flightData(t, x)
-      impactData(text, x)
+      flightData()
+      impactData(text)
       break
    
    #データを表示
    if i % step == 0 or info == 1:
       #表示周期毎と終点精度調整中に表示
-      flightData(t, x)
+      flightData()
 
    if t >= te:
       #時間切れ
@@ -661,14 +692,30 @@ for i in range(999999):
 
 
 #グラフの表示
-fig, ax = plt.subplots(figsize = (10, 4))
+# フォント設定
+plt.rcParams['font.family'] = 'Hiragino Sans'
+# 太さ設定
+#plt.rcParams['font.weight'] = 'bold'
 
-ax.plot(gx, gz)
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize = (8, 6), tight_layout = True, sharex = "all")
+
+ax1.plot(gx, gz)
+ax1.set_title("BB弾の弾道")
 #ax.set_xlim(0, 50)
 #ax.set_ylim(0, 1.4)
-plt.grid()
-plt.xlabel('x  [m]')
-plt.ylabel('z  [m]')
+ax1.grid()
+#ax1.set_xlabel('距離  [m]')
+ax1.set_ylabel('高さ  [m]')
+
+ax2.plot(gx, gy)
+#ax2.set_title("距離と左右")
+ax2.sharex(ax1)
+#ax.set_xlim(0, 50)
+#ax.set_ylim(0, 1.0)
+ax2.invert_yaxis()
+ax2.grid()
+ax2.set_xlabel('距離  [m]')
+ax2.set_ylabel('左右  [m]')
 plt.show()
 
 print("stop")
