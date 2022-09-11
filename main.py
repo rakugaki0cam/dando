@@ -34,11 +34,11 @@ temp = 25.0             # 気温[°C]
 pres = 1013.25 * 100    # 気圧[Pa]  (hPa)
 humi = 60.00 / 100      # 湿度[%]   (%RH)
 ## マトまでの距離
-xTarget = 7.51          # 水平距離[m] 
+xTarget = 7.503          # 水平距離[m] 
 ## 射出時の角度
 elevAngle = 0.0         # 射出時の上下角度[°] 仰角＋、俯角ー
 lrAngle   = 0.0         # 射出時の左右角度[°] 右＋、左ー
-tiltAngle = 2.0         # ホップの傾き 0:正常 右＋、左ー
+tiltAngle = 0.0         # ホップの傾き 0:正常 右＋、左ー
 ## 風速
 vWind = 0.0             # 風速[m/s]
 dWind = 3               # 風向き[時]
@@ -642,8 +642,8 @@ gx = np.array([])
 gy = np.array([])
 gz = np.array([])
 
-t = 0#####
-step = 100  #表示周期  100###############
+t = 0
+step = 100  #表示周期
 impFlag = 0
 
 for i in range(999999):
@@ -674,16 +674,16 @@ for i in range(999999):
       flightData()
       impactData(text)
       break
-   
+
+   #時間切れ
+   if t >= te:
+      print("タイムオーバー")
+      break
+
    #データを表示
    if i % step == 0 or info == 1:
       #表示周期毎と終点精度調整中に表示
       flightData()
-
-   if t >= te:
-      #時間切れ
-      print("タイムオーバー")
-      break
 
 
 #グラフの表示
@@ -704,7 +704,6 @@ ax1.set_ylabel('高さ  [m]')
 
 gy = gy * 1000
 ax2.plot(gx, gy)
-#ax2.set_title("距離と左右")
 ax2.sharex(ax1)
 #ax.set_xlim(0, 50)
 #ax.set_ylim(0, 1.0)
