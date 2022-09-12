@@ -24,17 +24,22 @@ import matplotlib.pyplot as plt
 
 
 ### 諸元 #####
-g = 9.80665             # 重力[m/sec^2]
-mBb = 0.28 * 1e-3       # BB弾質量[kg] (g)
-rBb = 5.95 / 2 * 1e-3   # BB弾半径[m]  (φmm)
-v0 = 80.0               # 初速[m/sec]
-hop = 200               # ホップ回転数[rps]
 ## 気象
-temp = 25.0             # 気温[°C]
-pres = 1013.25 * 100    # 気圧[Pa]  (hPa)
-humi = 60.00 / 100      # 湿度[%]   (%RH)
+temp = 15.8             # 気温[°C]
+humi = 67.00 / 100      # 湿度[%]   (%RH)
+pres = 1019.2 * 100    # 気圧[Pa]  (hPa)
+## BB
+g = 9.80665             # 重力[m/sec^2]
+mBb = 0.200 * 1e-3       # BB弾質量[kg] (g)
+rBb = 5.95 / 2 * 1e-3   # BB弾半径[m]  (φmm)
+v0 = 86.12               # 初速[m/sec]
+hop = 168               # ホップ回転数[rps]
 ## マトまでの距離
-xTarget = 7.503          # 水平距離[m] 
+xV0meas = 0.031         # 初速測定位置[m]　
+v0Correct = 1           # 初速補正あり:1 　センサ1位置での初速を推測補正する
+xTarget1 = 7.219        # 水平距離[m]
+xTarget2 = 999          # 次が999でストップ
+xTarget3 = 999
 ## 射出時の角度
 elevAngle = 0.0         # 射出時の上下角度[°] 仰角＋、俯角ー
 lrAngle   = 0.0         # 射出時の左右角度[°] 右＋、左ー
@@ -64,10 +69,11 @@ omgy = -hop * math.cos(np.deg2rad(tiltAngle)) * 2 * math.pi    # ホップ      
 omgz =  hop * math.sin(np.deg2rad(tiltAngle)) * 2 * math.pi    # カーブ
 
 ## 空気抵抗係数のフィッティング式
-CdMethod = "Morrison"
-#fCd = "Clift&Gauvin"
+#CdMethod = "Morrison"
+#CdMethod = "Clift&Gauvin"
+CdMethod = "fixed0.43"
 ## 空気抵抗係数の実験補正値
-kCd = 1.0
+kCd = 0.979
 ## 回転数減衰の計算方法
 ik = 0                     #0:積分計算　1:近似計算
 ## 時間
@@ -331,13 +337,13 @@ def rkf45(t, h, x, xe):
 
 
 #-----------------------------
-def scalar(x, n = 3):
+def scalar(vec, n = 3):
    #スカラーを求める
-   # x: ベクトル
-   # n: 次元 (デフォルト: 3)
+   # vec: ベクトル
+   # n:   次元 (デフォルト: 3)
    sum = 0
    for i in range(n):
-      sum += x[i] ** 2
+      sum += vec[i] ** 2
    scalar = math.sqrt(sum)   
    return scalar   
 
@@ -431,8 +437,16 @@ def Cd(Re):
       Cd = c1 + c2
       #print("C&G Cd =",Cd)
 
+   elif CdMethod =="fixed0.43":
+      Cd = 0.43
+      #print("Fixed Cd =",Cd)
+   else:
+      print("Cd エラー")
+      while 1:
+         exit
+
    # 補正値をかける
-   Cd = Cd * kCd
+   Cd *= kCd
    #print("Cd =", Cd, "k =",kCd)
 
    return Cd
@@ -588,9 +602,11 @@ print("# エネルギ:          {:5.3f} J".format(Ene))
 print("# ホップ回転数:      {:5.1f} rps".format(abs(omgy / 2 / math.pi)))
 print("# 射出仰俯角:      {:+7.2f} °".format(elevAngle))
 print("# ホップ傾斜角:    {:+7.2f} °".format(tiltAngle))
-print("# マト距離:          {:5.3f} m".format(xTarget))
+print("# 初速位置:          {:5.3f} m".format(xV0meas))
+print("# マト1距離:         {:5.3f} m".format(xTarget1))
+print("# マト2距離:         {:5.3f} m".format(xTarget2))
 print("# 計算精度:       {:.2e} ".format(tol))
-print("# 空気抵抗係数:   {} のフィッティング式による".format(CdMethod))
+print("# 空気抵抗係数:   {} の式による".format(CdMethod))
 print("# 空気抵抗補正:      {:5.3f} ".format(kCd))
 print()
 print("計算回数     時刻     水平距離    着弾高さ      玉速度   ホップ回転数   エネルギ   計算刻み幅", end = '')
@@ -600,7 +616,7 @@ print("        y[mm]   vy[m/s]   ωz[rps]")      #　y　横方向
 
 
 ##### 表示サブルーチン
-def flightData():
+def flightData(x):
    #飛翔中のデータ表示
    dz = (x[2] - z0) * 1000    #着弾高さ Δz[mm]
    ymm = x[1] * 1000          #横へのブレ y[mm]
@@ -635,20 +651,60 @@ def impactData(text):
    print("                   左右の着弾ズレ  {:+8.2f} mm {}".format(x[1] * 1000, lr))
    return
 
-
 #####
+
+t = 0
+h = 0.001
+step = 100  #表示周期
+
+
+if v0Correct == 1:
+   #初速補正する場合
+
+   xV0 = np.copy(x)
+   for i in range(9999):
+      info = 0
+      t, xV0, h, info = rkf45(t, h, xV0, xV0meas)
+      if info < 0:
+         print("error stop")
+         while 1:
+            exit
+
+      #初速測定位置
+      if info == 2:
+         flightData(xV0)
+         t0 = t
+         dV0 = v0 - xV0[3]
+         x[3] = v0 + dV0
+         print("------------^^^^^-------- 初速測定位置 ----------^^^^^---  {:+6.3f}m/s 修正し　再計算 -------------------------------".format(dV0))
+         
+         break
+      #時間切れ
+      if t >= te:
+         print("タイムオーバー")
+         break
+      #データを表示
+      if i % step == 0 or info == 1:
+         #表示周期毎と終点精度調整中に表示
+         flightData(xV0)
+
+
 time = np.array([])
 gx = np.array([])
 gy = np.array([])
 gz = np.array([])
 
-t = 0
-step = 100  #表示周期
+xTarget = np.array([xTarget1, xTarget2, xTarget3])
+targetNum = 0
 impFlag = 0
+
+t = 0
+h = 0.001
+
 
 for i in range(999999):
    info = 0
-   t, x, h, info = rkf45(t, h, x, xTarget)
+   t, x, h, info = rkf45(t, h, x, xTarget[targetNum])
    if info < 0:
       print("error stop")
       while 1:
@@ -658,20 +714,24 @@ for i in range(999999):
    gx = np.append(gx, x[0])
    gy = np.append(gy, x[1])
    gz = np.append(gz, x[2])
-   
+
    #着弾した時
-   if impFlag == 0 and info == 2:   # x = x[0]
+   if impFlag == targetNum and info == 2:   # x = x[0]
       #着弾距離に達した時に一度だけ表示
       text = "マトへ着弾"
-      flightData()
+      flightData(x)
       impactData(text)
-      impFlag = 1
-      break             ########## 着地まで見るときはコメントアウトする
+      impFlag += 1
+      targetNum += 1
+      if xTarget[targetNum] >= 999:
+         break
+      h = 0.001
+      continue
 
    #着地した時
    if x[2] <= 0:   # z = x[2]
       text = "地面に落下"
-      flightData()
+      flightData(x)
       impactData(text)
       break
 
@@ -683,7 +743,7 @@ for i in range(999999):
    #データを表示
    if i % step == 0 or info == 1:
       #表示周期毎と終点精度調整中に表示
-      flightData()
+      flightData(x)
 
 
 #グラフの表示
