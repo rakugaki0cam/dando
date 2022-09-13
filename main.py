@@ -35,13 +35,13 @@ rBb = 5.95 / 2 * 1e-3   # BB弾半径[m]  (φmm)
 v0 = 86.12               # 初速[m/sec]
 hop = 168               # ホップ回転数[rps]
 ## マトまでの距離
-v0meas = 0.031          # 初速測定装置中心[m]　
+v0meas = 0.031          # 初速測定装置中心[m]　センサ1-2の中間位置
 v0Correct = 1           # 初速補正あり:1 　センサ1位置での初速を推測補正する
-xTarget1 = 7.219        # 水平距離[m]
-xTarget2 = 100          # 次が999でストップ
-xTarget3 = 999
+xTarget1 = 0.062        # 水平距離[m]
+xTarget2 = 7.219          # 次が999でストップ
+xTarget3 = 100
 ## 射出時の角度
-elevAngle = 20.0         # 射出時の上下角度[°] 仰角＋、俯角ー
+elevAngle = 0.0         # 射出時の上下角度[°] 仰角＋、俯角ー
 lrAngle   = 0.0         # 射出時の左右角度[°] 右＋、左ー （必ずゼロ）
 tiltAngle = 0.0         # ホップの傾き 0:正常 右＋、左ー
 ## 風速
@@ -63,13 +63,13 @@ kCd = 0.979
 ik = 0                     #0:積分計算　1:近似計算
 ## 時間
 h = 0.001                  #計算時間刻み初期値[sec]
-te = 5.0                   #終了時間[sec]
+te = 3.0                   #終了時間[sec]
 ##ルンゲクッタの計算精度
 # 1e-2  < tol           : 粗い　計算は速い
 # 1e-10 < tol < 1e-2    : 普通
 # 1e-12 < tol < 1e-10   : 精密　計算は遅い
 #         tol < 1e-12   : 非推奨
-tol = 1e-8
+tol = 1e-7
 
 
 ##初速の位置(水平距離を求める)
@@ -310,7 +310,7 @@ def rkf45(t, h, x, xe):
                continue
          elif endCnt == 0:
             ##解の計算をしたけれど終点に届いていない時
-            loopFlag = 0   #続く刻み幅修正処理へ   
+            loopFlag = 0   #続く刻み幅修正処理してからリターン  
          else:
             #終点調整後、終点まで届かなくなった場合、一度メインループへ戻り、データを表示させる
             endCnt += 1
@@ -338,11 +338,12 @@ def rkf45(t, h, x, xe):
          info = -1
          break
 
-   return t2, x4, h, info
+   return t2, h, x4, info
 
 
 
 #-----------------------------
+
 def magVector(vec, n = 3):
    #三次元ベクトルの大きさを求める
    # vec: ベクトル
@@ -585,9 +586,8 @@ def Fphi(u, omega, phi):
 #####  main ###################################
 
 N = 12   #微分方程式の階数
-x = np.array([x0, y0, z0, vx, vy, vz, omgx, omgy, omgz, ux, uy, uz])
-v = [vx, vy, vz]
-Ene = energy(mBb, v)
+x = np.array([x0, y0, z0, vx, vy, vz, omgx, omgy, omgz, ux, uy, uz])    #微分方程式の解（初期値）を代入
+Ene = energy(mBb, x[3:6])
 eta = eta_air(temp)
 rho = rho_humid(temp, pres, humi)
 
@@ -601,12 +601,12 @@ print("# 気圧:            {:5.2f} hPa".format(pres / 100))
 #print("# 重力:              {:5.3f} m/sec^2".format(g))
 #print("# 空気密度:          {:5.3f} kg/m^3".format(rho))
 #print("# 空気粘性率:    {:.3e} kg/ms".format(eta))
-print("# 初速:             {:6.2f} m/sec".format(v0, "[]"))
+print("# 初速:             {:6.2f} m/sec".format(v0))
 print("# エネルギ:          {:5.3f} J".format(Ene))
 print("# ホップ回転数:      {:5.1f} rps".format(abs(omgy / 2 / math.pi)))
 print("# 射出仰俯角:      {:+7.2f} °".format(elevAngle))
 print("# ホップ傾斜角:    {:+7.2f} °".format(tiltAngle))
-print("# 初速位置:          {:5.3f} m".format(xV0meas))
+#print("# 初速位置:          {:5.3f} m".format(xV0meas))
 print("# マト1距離:         {:5.3f} m".format(xTarget1))
 print("# マト2距離:         {:5.3f} m".format(xTarget2))
 print("# 計算精度:       {:.2e} ".format(tol))
@@ -624,8 +624,7 @@ def flightData(x):
    #飛翔中のデータ表示
    dz = (x[2] - z0) * 1000    #着弾高さ Δz[mm]
    ymm = x[1] * 1000          #横へのブレ y[mm]
-   v = [x[3], x[4], x[5]]         
-   Ene = energy(mBb, v)
+   Ene = energy(mBb, x[3:6])
    HopY = x[7] / 2 / math.pi     #通常ホップ軸
    HopZ = x[8] / 2 / math.pi     #傾きがある時
    print("{:6d} ".format(i), end = '')
@@ -641,7 +640,7 @@ def impactData(text):
    ke = x[3] / x[5]
    si = np.rad2deg(math.atan(1 / ke))
    #重力落下量
-   tg = - 1 / 2 * g * t ** 2 * 1000    #[mm]
+   tg = - 1 / 2 * g * t ** 2 * 1000    #[mm]空気抵抗の考慮がないため値が大きくなりすぎる
    #左右
    if x[1] > 0.000005:  #[m]
       lr = '右'
@@ -649,10 +648,9 @@ def impactData(text):
       lr = '左'
    else:
       lr = ''
-
-   print("           ^^----- {}  角度{:6.1f}° = 1/{:5.1f} (z/x) -----------------------------".format(text, si, abs(ke)))
-   print("                   重力落下量      {:+8.2f} mm    ホップアップ量{:+8.2f} mm  空気抵抗を考慮していないのでボツ".format(tg, (x[2] - z0) * 1000 - tg))
-   print("                   左右の着弾ズレ  {:+8.2f} mm {}".format(x[1] * 1000, lr))
+   print("---------^^^^^^^ {}  角度{:6.1f}° = 1/{:5.1f} (z/x) -----------------------------------".format(text, si, abs(ke)))
+   #print("     重力落下量{:+8.2f} mm    ホップアップ量{:+8.2f} mm  空気抵抗を考慮していないのでボツ".format(tg, (x[2] - z0) * 1000 - tg))
+   print("                 左右の着弾ズレ  {:+8.2f} mm {}".format(x[1] * 1000, lr))
    return
 
 #####
@@ -661,15 +659,12 @@ t = 0
 h = 0.001
 step = 100  #表示周期
 
-
-if v0Correct == 1:
-   #初速補正する場合
+if v0Correct == 1:   #初速補正する場合
+   xVzero = np.copy(x)  #計算データのコピー
    i = 0
-   flightData(x)     #t=0のデータ表示
-   xVzero = np.copy(x)
+   flightData(xVzero)   #t=0のデータ表示
    for i in range(1, 999):
-      info = 0
-      t, xVzero, h, info = rkf45(t, h, xVzero, xV0meas)
+      t, h, xVzero, info = rkf45(t, h, xVzero, xV0meas)
       if info < 0:
          print("error stop")
          while 1:
@@ -678,16 +673,10 @@ if v0Correct == 1:
       #初速測定位置
       if info == 2:
          flightData(xVzero)
-         vZero2 = [xVzero[3], xVzero[4], xVzero[5]]
-         v02 = magVector(vZero2, 3)
-
-         dV0 =  v0 - v02
+         dV0 = v0 - magVector(xVzero[3:6], 3)         #ベクトルの大きさで計算
          v00 = v0 + dV0
-
-         #初速値を補正変更
-         x[3], x[4], x[5] = muzzleVelocity(v00, vy)
-
-         print("-----------^^^^^---- 初速測定位置 -----^^^^^--  {:+6.3f}m/s 修正し再計算 -------------------------------".format(dV0))
+         x[3], x[4], x[5] = muzzleVelocity(v00, vy)   #初速値を補正変更
+         print("-----------^^^^^---- 初速測定位置 -----^^^^^--  {:+6.3f}m/s 修正し再計算 -----------------------".format(dV0))
          break
       #時間切れ
       if t >= te:
@@ -698,7 +687,7 @@ if v0Correct == 1:
          #表示周期毎と終点精度調整中に表示
          flightData(xVzero)
 
-
+#弾道計算メイン
 time = np.array([])
 gx = np.array([])
 gy = np.array([])
@@ -706,7 +695,6 @@ gz = np.array([])
 
 xTarget = np.array([xTarget1, xTarget2, xTarget3])
 targetNum = 0
-impFlag = 0
 
 t = 0
 h = 0.001
@@ -714,7 +702,7 @@ i = 0
 flightData(x)     #t=0のデータ表示
 for i in range(1, 999999):
    info = 0
-   t, x, h, info = rkf45(t, h, x, xTarget[targetNum])
+   t, h, x, info = rkf45(t, h, x, xTarget[targetNum])
    if info < 0:
       print("error stop")
       while 1:
@@ -726,12 +714,10 @@ for i in range(1, 999999):
    gz = np.append(gz, x[2])
 
    #着弾した時
-   if impFlag == targetNum and info == 2:   # x = x[0]
-      #着弾距離に達した時に一度だけ表示
-      text = "マトへ着弾"
+   if info == 2:
       flightData(x)
+      text = "マトへ着弾"
       impactData(text)
-      impFlag += 1
       targetNum += 1
       if xTarget[targetNum] >= 999:
          break
@@ -740,8 +726,8 @@ for i in range(1, 999999):
 
    #着地した時
    if x[2] <= 0:   # z = x[2]
-      text = "地面に落下"
       flightData(x)
+      text = "地面に落下"
       impactData(text)
       break
 
