@@ -35,39 +35,24 @@ rBb = 5.95 / 2 * 1e-3   # BB弾半径[m]  (φmm)
 v0 = 86.12               # 初速[m/sec]
 hop = 168               # ホップ回転数[rps]
 ## マトまでの距離
-xV0meas = 0.031         # 初速測定位置[m]　
+v0meas = 0.031          # 初速測定装置中心[m]　
 v0Correct = 1           # 初速補正あり:1 　センサ1位置での初速を推測補正する
 xTarget1 = 7.219        # 水平距離[m]
-xTarget2 = 999          # 次が999でストップ
+xTarget2 = 100          # 次が999でストップ
 xTarget3 = 999
 ## 射出時の角度
-elevAngle = 0.0         # 射出時の上下角度[°] 仰角＋、俯角ー
-lrAngle   = 0.0         # 射出時の左右角度[°] 右＋、左ー
+elevAngle = 20.0         # 射出時の上下角度[°] 仰角＋、俯角ー
+lrAngle   = 0.0         # 射出時の左右角度[°] 右＋、左ー （必ずゼロ）
 tiltAngle = 0.0         # ホップの傾き 0:正常 右＋、左ー
 ## 風速
 vWind = 0.0             # 風速[m/s]
-dWind = 3               # 風向き[時]
-
-## 風速
-sWind = np.deg2rad(dWind * 30)   # 3時=90° 右から左、9時=270° 左から右、6時=180° 追い風、12時=360° 向かい風
-ux = -vWind * math.cos(sWind)    # 追い風-、向かい風+[m/sec]
-uy = -vWind * math.sin(sWind)    # 左からの風-、右からの風+[m/sec]
-uz = 0                           # 下から上への風+、上から下への風-[m/sec]
+dWind = 3               # 風向き[時] 3時:右からの風
 ## 初期位置
 x0 = 0.0                # 距離[m]
 y0 = 0.0                # 左右[m]
 z0 = 1.0                # 高さ[m]
-## 初期速度
-vy = 0                     # 左右方向のブレ[m/sec]
-vx = math.sqrt(v0 ** 2 - vy ** 2) * math.cos(math.pi * elevAngle / 180)
-                           # 水平方向の初速[m/sec]
-vz = math.sqrt(v0 ** 2 - vy ** 2) * math.sin(math.pi * elevAngle / 180)
-                           # 鉛直方向の初速[m/sec]
-## 回転による周速度/r(半径)  ーー 軸の向き
-omgx =  0.0 * 2 * math.pi                                      # ライフリング
-omgy = -hop * math.cos(np.deg2rad(tiltAngle)) * 2 * math.pi    # ホップ       y軸まわりの回転
-omgz =  hop * math.sin(np.deg2rad(tiltAngle)) * 2 * math.pi    # カーブ
-
+## ブレ（初期速度）
+vy = 0                  # 左右方向のブレ[m/sec]
 ## 空気抵抗係数のフィッティング式
 #CdMethod = "Morrison"
 #CdMethod = "Clift&Gauvin"
@@ -86,6 +71,27 @@ te = 5.0                   #終了時間[sec]
 #         tol < 1e-12   : 非推奨
 tol = 1e-8
 
+
+##初速の位置(水平距離を求める)
+xV0meas = v0meas * np.cos(-np.deg2rad(elevAngle)) * np.cos(np.deg2rad(lrAngle)) #左右角度は必ずゼロ
+## 初期速度
+def muzzleVelocity(v0, vy):
+   v0y = vy                                                                   # 左右方向のブレ[m/sec]
+   v0x = math.sqrt(v0 ** 2 - v0y ** 2) * math.cos(math.pi * elevAngle / 180)  # 水平方向の初速[m/sec]
+   v0z = math.sqrt(v0 ** 2 - v0y ** 2) * math.sin(math.pi * elevAngle / 180)  # 鉛直方向の初速[m/sec]
+   return v0x ,v0y, v0z
+
+vx, vy, vz = muzzleVelocity(v0, vy)
+
+## ホップ回転の角速度  ーー 軸の向きに注意
+omgx =  0.0 * 2 * math.pi                                      # ライフリング
+omgy = -hop * math.cos(np.deg2rad(tiltAngle)) * 2 * math.pi    # ホップ       y軸まわりの回転
+omgz =  hop * math.sin(np.deg2rad(tiltAngle)) * 2 * math.pi    # カーブ
+## 風速
+sWind = np.deg2rad(dWind * 30)   # 風向き　3時=90° 右から左、9時=270° 左から右、6時=180° 追い風、12時=360° 向かい風
+ux = -vWind * math.cos(sWind)    # 追い風-、向かい風+[m/sec]
+uy = -vWind * math.sin(sWind)    # 左からの風-、右からの風+[m/sec]
+uz = 0                           # 下から上への風+、上から下への風-[m/sec]
 
 
 def rho_humid(T, P, H):
@@ -132,14 +138,14 @@ def rkfd(t, x, n):
    v   = np.zeros(3)    #速度 vx,vy,vz
    omg = np.zeros(3)    #回転数 ωx,ωy,ωz
    u   = np.zeros(3)    #風速 ux,uy,uz
-   relv = np.zeros(3)   #相対速度　風を考慮した速度
+   relV = np.zeros(3)   #相対速度　風を考慮した速度
    
    for i in range(3):
       p[i]   = x[i]        #0,1,2
       v[i]   = x[3 + i]    #3,4,5
       omg[i] = x[6 +i]     #6,7,8
       u[i]   = x[9 + i]    #9,10,11
-      relv[i] = v[i] - u[i]   # 風がある時の相対速度
+      relV[i] = v[i] - u[i]   # 風がある時の相対速度
  
    #呼び出し番号nによる処理式の区分け
    if n < 3:
@@ -153,26 +159,26 @@ def rkfd(t, x, n):
       # d v_{x,y,z}/dt = F{x,y,z}
       nn = n - 3    #v[n] = x[n-3]
       Fg = fGr(nn)
-      Fa = fAirReg(nn, relv)
-      Fl = fMagnus(nn, omg, relv)
+      Fa = fAirReg(nn, relV)
+      Fl = fMagnus(nn, omg, relV)
       fn = (Fg + Fa + Fl) / mBb      
    elif n < 9:
       #6,7,8
       # 回転速度の減衰
       # d omega{x,y,z}/dt = N_{x,y,z}/I
-      omgS = scalar(omg, 3)
-      if omgS < 1e-13:
+      mOmega = magVector(omg, 3)
+      if mOmega < 1e-13:
          fn = 0
       else:
          I = 0.4 * mBb * rBb ** 2
-         vS = scalar(relv, 3)
+         mRelV = magVector(relV, 3)
          if ik == 0:
             #積分計算
-            fn = (Nz(vS, omgS) / I) * x[n] / omgS
+            fn = (Nz(mRelV, mOmega) / I) * x[n] / mOmega
          else:
             #(ik == 1)
             #近似計算
-            fn = (Nze(vS, omgS) / I) * x[n] / omgS  
+            fn = (Nze(mRelV, mOmega) / I) * x[n] / mOmega  
    elif n < 12:
       #9,10,11
       # 風の計算 = 相対速度
@@ -211,7 +217,7 @@ def rkf45(t, h, x, xe):
    loopFlag = 1
    
    #精度値の計算
-   Sy = scalar(x, kai)
+   Sy = magVector(x, kai)
    if Sy > 1:
       err = tol * Sy
    else:
@@ -337,15 +343,13 @@ def rkf45(t, h, x, xe):
 
 
 #-----------------------------
-def scalar(vec, n = 3):
-   #スカラーを求める
+def magVector(vec, n = 3):
+   #三次元ベクトルの大きさを求める
    # vec: ベクトル
    # n:   次元 (デフォルト: 3)
-   sum = 0
-   for i in range(n):
-      sum += vec[i] ** 2
-   scalar = math.sqrt(sum)   
-   return scalar   
+   v = np.array(vec[0:n])
+   mag = np.sqrt(np.sum(v ** 2))
+   return mag
 
 
 def energy(m, v):
@@ -370,24 +374,24 @@ def fAirReg(dir, v):
    # 粘性抵抗分も含まれる
    # dir: 0,1,2 = x,y,z 
    # v[dir] = vx,vy,vz
-   vS = scalar(v)
-   Fairregistance = -1 / 2 * Cd(reynoldsNum(vS, 2 * rBb)) * rho * math.pi * rBb ** 2 * vS * v[dir]
+   mV = magVector(v)
+   Fairregistance = -1 / 2 * Cd(reynoldsNum(mV, 2 * rBb)) * rho * math.pi * rBb ** 2 * mV * v[dir]
    return Fairregistance
 
 
 def fMagnus(dir, omg, v):
    # 揚力分
    Fmagnus = 0
-   omgS = scalar(omg, 3)
+   omgS = magVector(omg, 3)
    if omgS < 1e-14:
       return Fmagnus
   
-   vS = scalar(v, 3)
+   vS = magVector(v, 3)
    l = np.zeros(3)
    l[0] = v[1] * omg[2] - v[2] * omg[1]
    l[1] = v[2] * omg[0] - v[0] * omg[2]
    l[2] = v[0] * omg[1] - v[1] * omg[0]
-   lS = scalar(l, 3)
+   lS = magVector(l, 3)
    if lS < 1e-14:
       return Fmagnus
   
@@ -609,10 +613,10 @@ print("# 計算精度:       {:.2e} ".format(tol))
 print("# 空気抵抗係数:   {} の式による".format(CdMethod))
 print("# 空気抵抗補正:      {:5.3f} ".format(kCd))
 print()
-print("計算回数     時刻     水平距離    着弾高さ      玉速度   ホップ回転数   エネルギ   計算刻み幅", end = '')
-print("    左右位置  左右速度 カーブ回転")
-print("          t[msec]         x[m]      Δz[mm]     vx[m/s]      ωy[rps]        E[J]     Δt[msec]", end = '')
-print("        y[mm]   vy[m/s]   ωz[rps]")      #　y　横方向
+print("計算回数    時刻  水平距離    玉高さ  玉速度 HOP回転 エネルギ 時間刻み", end = '')
+print("  LR位置  LR速度  LR回転")
+print("         t[msec]      x[m]    Δz[mm] vx[m/s] ωy[rps]    E[J]   Δt[ms]", end = '')
+print("    y[mm] vy[m/s] ωz[rps]")      #　y　横方向
 
 
 ##### 表示サブルーチン
@@ -624,11 +628,11 @@ def flightData(x):
    Ene = energy(mBb, v)
    HopY = x[7] / 2 / math.pi     #通常ホップ軸
    HopZ = x[8] / 2 / math.pi     #傾きがある時
-   print("{:6d}  ".format(i), end = '')
-   print("{:9.3f}    {:9.4f}    {:+8.2f}      ".format(t * 1000, x[0], dz), end = '')
-   print("{:6.2f}       {:6.1f}      {:6.3f}     {:8.4f}".format(x[3], HopY, Ene, h * 1000), end = '')
+   print("{:6d} ".format(i), end = '')
+   print("{:9.3f}  {:8.4f} {:+9.2f}  ".format(t * 1000, x[0], dz), end = '')
+   print("{:6.2f}  {:6.1f}  {:6.3f}  {:7.4f}".format(x[3], HopY, Ene, h * 1000), end = '')
    #print("{:8.4f}".format(h * 1000), end = '')
-   print("     {:+8.2f}    {:6.3f}    {:6.1f}".format(ymm, x[4], HopZ))    #　y　横方向
+   print(" {:+8.2f}  {:6.3f}  {:6.1f}".format(ymm, x[4], HopZ))    #　y　横方向
    return
 
 
@@ -660,11 +664,12 @@ step = 100  #表示周期
 
 if v0Correct == 1:
    #初速補正する場合
-
-   xV0 = np.copy(x)
-   for i in range(9999):
+   i = 0
+   flightData(x)     #t=0のデータ表示
+   xVzero = np.copy(x)
+   for i in range(1, 999):
       info = 0
-      t, xV0, h, info = rkf45(t, h, xV0, xV0meas)
+      t, xVzero, h, info = rkf45(t, h, xVzero, xV0meas)
       if info < 0:
          print("error stop")
          while 1:
@@ -672,12 +677,17 @@ if v0Correct == 1:
 
       #初速測定位置
       if info == 2:
-         flightData(xV0)
-         t0 = t
-         dV0 = v0 - xV0[3]
-         x[3] = v0 + dV0
-         print("------------^^^^^-------- 初速測定位置 ----------^^^^^---  {:+6.3f}m/s 修正し　再計算 -------------------------------".format(dV0))
-         
+         flightData(xVzero)
+         vZero2 = [xVzero[3], xVzero[4], xVzero[5]]
+         v02 = magVector(vZero2, 3)
+
+         dV0 =  v0 - v02
+         v00 = v0 + dV0
+
+         #初速値を補正変更
+         x[3], x[4], x[5] = muzzleVelocity(v00, vy)
+
+         print("-----------^^^^^---- 初速測定位置 -----^^^^^--  {:+6.3f}m/s 修正し再計算 -------------------------------".format(dV0))
          break
       #時間切れ
       if t >= te:
@@ -686,7 +696,7 @@ if v0Correct == 1:
       #データを表示
       if i % step == 0 or info == 1:
          #表示周期毎と終点精度調整中に表示
-         flightData(xV0)
+         flightData(xVzero)
 
 
 time = np.array([])
@@ -700,9 +710,9 @@ impFlag = 0
 
 t = 0
 h = 0.001
-
-
-for i in range(999999):
+i = 0
+flightData(x)     #t=0のデータ表示
+for i in range(1, 999999):
    info = 0
    t, x, h, info = rkf45(t, h, x, xTarget[targetNum])
    if info < 0:
