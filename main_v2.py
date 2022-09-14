@@ -1,12 +1,14 @@
-# 弾道計算プログラム
+# 弾道計算プログラム　v2
 #  
 #     BB弾の弾道を求める
 #     ホップ回転による揚力計算
-#     空気抵抗係数は補正して使用
+#     空気抵抗係数はkcdにて補正して使用
 #
 #     追加　着弾までの時間を求める
 #
-#        2022/08/29
+#           2022/08/29     初速を補正計算し、弾道を再計算
+#        v2 2022/09/14     初速位置補正を位置と時間の引き算だけに 
+#
 #           カムのらくがき帳
 #
 #  pythonへ移植
@@ -39,9 +41,9 @@ v0meas = 0.031          # 初速測定装置中心[m]　センサ1-2の中間位
 v0Correct = 1           # 初速補正あり:1 　センサ1位置での初速を推測補正する
 xTarget1 = 0.062        # 水平距離[m]
 xTarget2 = 7.219          # 次が999でストップ
-xTarget3 = 100
+xTarget3 = 999
 ## 射出時の角度
-elevAngle = 10.0         # 射出時の上下角度[°] 仰角＋、俯角ー
+elevAngle = 0.0         # 射出時の上下角度[°] 仰角＋、俯角ー
 lrAngle   = 0.0         # 射出時の左右角度[°] 右＋、左ー （必ずゼロ）
 tiltAngle = 0.0         # ホップの傾き 0:正常 右＋、左ー
 ## 風速
@@ -73,7 +75,7 @@ tol = 1e-7
 
 
 ##初速の位置(水平距離を求める)
-xV0meas = v0meas * np.cos(-np.deg2rad(elevAngle)) * np.cos(np.deg2rad(lrAngle)) #左右角度は必ずゼロ
+xV0meas = v0meas * np.cos(-np.deg2rad(elevAngle)) #左右角度は必ずゼロ
 ## 初期速度
 def muzzleVelocity(v0, vy):
    v0y = vy                                                                   # 左右方向のブレ[m/sec]
@@ -606,20 +608,23 @@ print("# 初速:             {:6.2f} m/sec".format(v0))
 print("# ホップ回転数:      {:5.1f} rps".format(abs(omgy / 2 / math.pi)))
 print("# 射出仰俯角:      {:+7.2f} °".format(elevAngle))
 print("# ホップ傾斜角:    {:+7.2f} °".format(tiltAngle))
-#print("# 初速位置:          {:5.3f} m".format(xV0meas))
-print("# マト1距離:         {:5.3f} m".format(xTarget1))
-print("# マト2距離:         {:5.3f} m".format(xTarget2))
+print("# 初速位置:        {:7.3f} m".format(xV0meas))
+print("# マト1距離:       {:7.3f} m".format(xTarget1))
+print("# マト2距離:       {:7.3f} m".format(xTarget2))
 print("# 計算精度:       {:.2e} ".format(tol))
 print("# 空気抵抗係数:   {} の式による".format(CdMethod))
 print("# 空気抵抗補正:      {:5.3f} ".format(kCd))
 print()
-print("計算回数    時刻  水平距離    玉高さ  玉速度 HOP回転 エネルギ 時間刻み", end = '')
-print("  LR位置  LR速度  LR回転")
-print("         t[msec]      x[m]    Δz[mm] vx[m/s] ωy[rps]    E[J]   Δt[ms]", end = '')
-print("    y[mm] vy[m/s] ωz[rps]")      #　y　横方向
 
 
 ##### 表示サブルーチン
+def titleData():
+   print("計算回数    時刻  水平距離    玉高さ  玉速度 HOP回転 エネルギ 時間刻み", end = '')
+   print("  LR位置  LR速度  LR回転")
+   print("         t[msec]      x[m]    Δz[mm] vx[m/s] ωy[rps]    E[J]   Δt[ms]", end = '')
+   print("    y[mm] vy[m/s] ωz[rps]")      #　y　横方向
+   return
+
 def flightData(x):
    #飛翔中のデータ表示
    dz = (x[2] - z0) * 1000    #着弾高さ Δz[mm]
@@ -633,7 +638,6 @@ def flightData(x):
    #print("{:8.4f}".format(h * 1000), end = '')
    print(" {:+8.2f}  {:6.3f}  {:6.1f}".format(ymm, x[4], HopZ))    #　y　横方向
    return
-
 
 def impactData(text):
    #着弾、落下時の角度
@@ -655,37 +659,8 @@ def impactData(text):
 
 #####
 
-t = 0
 h = 0.001
 step = 100  #表示周期
-
-if v0Correct == 1:   #初速補正する場合
-   xVzero = np.copy(x)  #計算データのコピー
-   i = 0
-   flightData(xVzero)   #t=0のデータ表示
-   for i in range(1, 999):
-      t, h, xVzero, info = rkf45(t, h, xVzero, xV0meas)
-      if info < 0:
-         print("error stop")
-         while 1:
-            exit
-
-      #初速測定位置
-      if info == 2:
-         flightData(xVzero)
-         dV0 = v0 - magVector(xVzero[3:6], 3)         #ベクトルの大きさで計算
-         v00 = v0 + dV0
-         x[3], x[4], x[5] = muzzleVelocity(v00, vy)   #初速値を補正変更
-         print("-----------^^^^^---- 初速測定位置 -----^^^^^--  {:+6.3f}m/s 修正し再計算 -----------------------".format(dV0))
-         break
-      #時間切れ
-      if t >= te:
-         print("タイムオーバー")
-         break
-      #データを表示
-      if i % step == 0 or info == 1:
-         #表示周期毎と終点精度調整中に表示
-         flightData(xVzero)
 
 #弾道計算メイン
 time = np.array([])
@@ -693,12 +668,18 @@ gx = np.array([])
 gy = np.array([])
 gz = np.array([])
 
+if v0Correct == 1:   #初速補正する場合
+   #初期値を変更することで補正
+   t =  v0meas / v0
+   x[0] = xV0meas
+else:
+   t = 0
+
 xTarget = np.array([xTarget1, xTarget2, xTarget3])
 targetNum = 0
 
-t = 0
-h = 0.001
 i = 0
+titleData()
 flightData(x)     #t=0のデータ表示
 for i in range(1, 999999):
    info = 0
@@ -716,10 +697,27 @@ for i in range(1, 999999):
    #着弾した時
    if info == 2:
       flightData(x)
+      """
+      if v0Correct == 1:   #初速補正する場合
+         tCorr = (t + tV0) * 1000
+         print("{:6d}+{:9.3f}  {:8.4f} ** 初速位置補正前データ".format(i, tCorr, x[0] + xV0meas ))
+         print("計算時刻 = ", tCorr, "   測定時刻を入力")
+         input(a)
+      """
+
+
+
+
+
+
+
       text = "マトへ着弾"
       impactData(text)
       targetNum += 1
-      if xTarget[targetNum] >= 999:
+      if xTarget[targetNum] >= 900:
+
+
+
          break
       h = 0.001
       continue
