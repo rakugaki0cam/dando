@@ -193,13 +193,14 @@ def rkfd(t, x, n):
    return fn
 
 
-def rkf45(t, h, x, xe):
+def rkf45(t, h, x, xe = 9999, te = 9999):
    # ルンゲ・クッタ=フェールベルグ法
    # 刻み幅自動制御
    # t:    時刻(+)
    # h:    刻み幅(+)
    # x[]:  微分方程式の解
-   # xe:   距離終点値
+   # xe:   距離終点値　使わない時　9999->到達しない
+   # te:   時間終点値　使わない時　9999->到達しない
    #
    # 戻り値
    # info = -2  異常　刻み幅が大きくなり過ぎ
@@ -207,6 +208,7 @@ def rkf45(t, h, x, xe):
    #      =  0  正常計算進行中
    #      =  1  xe終点に到達し、精度調整中
    #      =  2  xe終点値に到達し計算完了
+   #      =  3  te終点値に到達し計算完了
 
    kai = 3        ## 刻み幅修正計算の対象を位置だけにする　{x,y,z} = {x[0],x[1],x[3]}
    #kai = N       ## 全ての階を対象にする
@@ -312,6 +314,7 @@ def rkf45(t, h, x, xe):
                continue
          elif endCnt == 0:
             ##解の計算をしたけれど終点に届いていない時
+   
             loopFlag = 0   #続く刻み幅修正処理してからリターン  
          else:
             #終点調整後、終点まで届かなくなった場合、一度メインループへ戻り、データを表示させる
@@ -332,6 +335,22 @@ def rkf45(t, h, x, xe):
       else:
          #Rがほぼ0の時は刻み幅は小さすぎるので4倍に
          h *= 4
+
+
+      #tが終点に近づいた時   ################################
+      if abs(te - t) <= abs(h):
+         h = te - t
+         info = 3
+         #continue
+
+
+
+
+
+
+
+
+
       #刻み幅のチェック
       if h > hMax:
          info = -2
@@ -339,6 +358,7 @@ def rkf45(t, h, x, xe):
       if h < hMin:
          info = -1
          break
+      
 
    return t2, h, x4, info
 
@@ -678,12 +698,14 @@ else:
 xTarget = np.array([xTarget1, xTarget2, xTarget3])
 targetNum = 0
 
+
+tEnd = 30 / 1000 #t終点[msec]
 i = 0
 titleData()
 flightData(x)     #t=0のデータ表示
 for i in range(1, 999999):
    info = 0
-   t, h, x, info = rkf45(t, h, x, xTarget[targetNum])
+   t, h, x, info = rkf45(t, h, x, xTarget[targetNum], tEnd)
    if info < 0:
       print("error stop")
       while 1:
@@ -706,11 +728,6 @@ for i in range(1, 999999):
       """
 
 
-
-
-
-
-
       text = "マトへ着弾"
       impactData(text)
       targetNum += 1
@@ -721,6 +738,11 @@ for i in range(1, 999999):
          break
       h = 0.001
       continue
+
+   if info == 3:
+      flightData(x)
+      print("t end")
+      break
 
    #着地した時
    if x[2] <= 0:   # z = x[2]
