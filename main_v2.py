@@ -40,8 +40,8 @@ hop = 168               # ホップ回転数[rps]
 v0meas = 0.031          # 初速測定装置中心[m]　センサ1-2の中間位置
 v0Correct = 1           # 初速補正あり:1 　センサ1位置での初速を推測補正する
 xTarget1 = 0.062        # 水平距離[m]
-xTarget2 = 7.219          # 次が999でストップ
-xTarget3 = 999
+xTarget2 = 100          # 次が999でストップ
+xTarget3 = 100
 ## 射出時の角度
 elevAngle = 0.0         # 射出時の上下角度[°] 仰角＋、俯角ー
 lrAngle   = 0.0         # 射出時の左右角度[°] 右＋、左ー （必ずゼロ）
@@ -58,9 +58,9 @@ vy = 0                  # 左右方向のブレ[m/sec]
 ## 空気抵抗係数のフィッティング式
 #CdMethod = "Morrison"
 #CdMethod = "Clift&Gauvin"
-CdMethod = "fixed0.43"
+CdMethod = "fixed0.45"
 ## 空気抵抗係数の実験補正値
-kCd = 0.979
+kCd = 1.01
 ## 回転数減衰の計算方法
 ik = 0                     #0:積分計算　1:近似計算
 ## 時間
@@ -208,7 +208,8 @@ def rkf45(t, h, x, xe = 9999, te = 9999):
    #      =  0  正常計算進行中
    #      =  1  xe終点に到達し、精度調整中
    #      =  2  xe終点値に到達し計算完了
-   #      =  3  te終点値に到達し計算完了
+   #      =  3  te終了値に到達し、刻み幅調整
+   #      =  4  te終了値に到達し計算完了
 
    kai = 3        ## 刻み幅修正計算の対象を位置だけにする　{x,y,z} = {x[0],x[1],x[3]}
    #kai = N       ## 全ての階を対象にする
@@ -314,15 +315,34 @@ def rkf45(t, h, x, xe = 9999, te = 9999):
                continue
          elif endCnt == 0:
             ##解の計算をしたけれど終点に届いていない時
-   
-            loopFlag = 0   #続く刻み幅修正処理してからリターン  
+            #終了時刻の判定
+            if t2 >= te:
+               #時刻終了値に到達し計算終了
+               h = 0
+               info = 4
+               break
+            elif t2 + h > te:
+               #次回計算時に時刻終了値をオーバーするため
+               #hを調整し時刻終了値に合わせる
+               h = te - t2
+               info = 3
+               break
+            else:   
+               loopFlag = 0   #続く刻み幅修正処理してからリターン  
+
          else:
             #終点調整後、終点まで届かなくなった場合、一度メインループへ戻り、データを表示させる
             endCnt += 1
             shuten("終点に届かなくなった")
             h *= 1.5    #刻み幅を広くする（2倍するとひとつ前の刻み幅と同じになる）
             info = 1
-            break            
+            break
+       
+
+
+
+
+
       #刻み幅hを修正  
       if R >= 1e-20:       #ゼロ割り算防止
          delta = (err / (2 * R)) ** (1 / 4)
@@ -337,15 +357,7 @@ def rkf45(t, h, x, xe = 9999, te = 9999):
          h *= 4
 
 
-      #tが終点に近づいた時   ################################
-      if abs(te - t) <= abs(h):
-         h = te - t
-         info = 3
-         #continue
-
-
-
-
+      
 
 
 
@@ -464,8 +476,8 @@ def Cd(Re):
       Cd = c1 + c2
       #print("C&G Cd =",Cd)
 
-   elif CdMethod =="fixed0.43":
-      Cd = 0.43
+   elif CdMethod =="fixed0.45":
+      Cd = 0.45
       #print("Fixed Cd =",Cd)
    else:
       print("Cd エラー")
@@ -634,6 +646,8 @@ print("# マト2距離:       {:7.3f} m".format(xTarget2))
 print("# 計算精度:       {:.2e} ".format(tol))
 print("# 空気抵抗係数:   {} の式による".format(CdMethod))
 print("# 空気抵抗補正:      {:5.3f} ".format(kCd))
+if CdMethod == "fixed0.45":
+   print("# 空気抵抗係数:      {:5.3f} ".format(0.45 * kCd))
 print()
 
 
@@ -699,7 +713,9 @@ xTarget = np.array([xTarget1, xTarget2, xTarget3])
 targetNum = 0
 
 
-tEnd = 30 / 1000 #t終点[msec]
+tEnd = 96.590 / 1000 #t終了値[msec]#####################
+xTend = 7.219        #xマト位置[m]######################
+
 i = 0
 titleData()
 flightData(x)     #t=0のデータ表示
@@ -719,29 +735,28 @@ for i in range(1, 999999):
    #着弾した時
    if info == 2:
       flightData(x)
-      """
-      if v0Correct == 1:   #初速補正する場合
-         tCorr = (t + tV0) * 1000
-         print("{:6d}+{:9.3f}  {:8.4f} ** 初速位置補正前データ".format(i, tCorr, x[0] + xV0meas ))
-         print("計算時刻 = ", tCorr, "   測定時刻を入力")
-         input(a)
-      """
-
-
       text = "マトへ着弾"
       impactData(text)
       targetNum += 1
       if xTarget[targetNum] >= 900:
-
-
-
          break
       h = 0.001
       continue
 
-   if info == 3:
+   if info == 4:
+      #時間終了の時
       flightData(x)
-      print("t end")
+      print("t終了  xマト位置{:6.3f}m   計算値との差{:+6.3}mm".format(xTend, (x[0] - xTend) * 1000))
+
+
+
+
+
+
+
+
+
+
       break
 
    #着地した時
@@ -757,7 +772,7 @@ for i in range(1, 999999):
       break
 
    #データを表示
-   if i % step == 0 or info == 1:
+   if i % step == 0 or info == 1 or info == 3:
       #表示周期毎と終点精度調整中に表示
       flightData(x)
 
