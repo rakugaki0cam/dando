@@ -31,23 +31,23 @@ import matplotlib.pyplot as plt
 
 ### 諸元 #####
 # 気象
-temp = 24.40             # 気温[°C]
-humi = 64.00 / 100       # 湿度[%]   (%RH)
-pres = 1006.00 * 100     # 気圧[Pa]  (hPa)
+temp = 28.7            # 気温[°C]
+humi = 50.3 / 100       # 湿度[%]   (%RH)
+pres = 1016.10 * 100     # 気圧[Pa]  (hPa)
 # BB
 g = 9.80665             # 重力[m/sec^2]
-mBb = 0.285 * 1e-3      # BB弾質量[kg] (g)
+mBb = 0.279 * 1e-3      # BB弾質量[kg] (g)
 rBb = 5.95 / 2 * 1e-3   # BB弾半径[m]  (φmm)
-v0 = 73.03              # 初速[m/sec]
-hop = 194.0             # ホップ回転数[rps]
+v0 = 78.431            # 初速[m/sec]
+hop = 189.2          # ホップ回転数[rps]
 # 測定値から空気抵抗係数を求める
 CdFind = 1              # 1:求める 0:計算しない
-xTend = 7.443           # 着弾センサ位置[m]
-tEnd = 112.48 / 1000    # 着弾時間[sec]　(msec)
+xTend = 2.564           # 着弾センサ位置[m]
+tEnd = 33.945 / 1000    # 着弾時間[sec]　(msec)
 # マトまでの距離
-v0meas = 0.031          # 初速測定装置中心[m]　センサ1-2の中間位置
+v0meas = 0.006          # 初速測定装置中心[m]　センサ1-2の中間位置 xcortech 0.032, strobe 0.006
 v0Correct = 1           # 初速補正あり:1 　センサ1位置での初速を推測補正する
-xTarget1 = 10           # 水平距離[m]
+xTarget1 = 10          # 水平距離[m]
 xTarget2 = 30          # 次が999でストップ
 xTarget3 = 999
 # 射出時の角度
@@ -69,6 +69,7 @@ vy = 0                  # 左右方向のブレ[m/sec]
 CdMethod = "fixed0.45"
 # 空気抵抗係数の実験補正値
 kCd = 1.00
+initCd = 0.45
 # 回転数減衰の計算方法
 ik = 0                  # 0:積分計算　1:近似計算
 # 時間
@@ -485,7 +486,7 @@ def Cd(Re):
         #print("C&G Cd =", cd)
 
     elif CdMethod == "fixed0.45":
-        cd = 0.45
+        cd = initCd
         #print("Fixed Cd =", cd)
     else:
         print("Cd エラー")
@@ -662,7 +663,7 @@ print(f"# 空気抵抗係数:   {CdMethod} の式による")
 if CdFind != 1:
     print(f"# 空気抵抗補正:      {kCd:5.3f} ")
     if CdMethod == "fixed0.45":
-        print(f"# 空気抵抗係数:      {(0.45 * kCd):5.3f} ")
+        print(f"# 空気抵抗係数:      {(initCd * kCd):5.3f} ")
 print()
 
 
@@ -775,10 +776,10 @@ while CdFind == 1:  # 空気抵抗係数を求める場合はループ
         if ans == 4:
             flightData(ii, tt, hh, xArray)
             dxT = (xArray[0] - xTend) * 1000
-            print(f"Cd = {(0.45 * kCd):7.5f}  マト測定位置 {xTend:7.4f}m   計算値との差 {dxT:+7.4}mm  -->  ", end='')  # Cd
+            print(f"Cd = {(initCd * kCd):7.5f}  マト測定位置 {xTend:7.4f}m   計算値との差 {dxT:+7.4}mm  -->  ", end='')  # Cd
 
             # 特別データ #####
-            dist.append([(0.45 * kCd), xArray[0]])
+            dist.append([(initCd * kCd), xArray[0]])
             #####
 
             if abs(dxT) < 0.1:  # 差が0.1mm以下で完了
@@ -815,40 +816,43 @@ while CdFind == 1:  # 空気抵抗係数を求める場合はループ
             # 表示周期毎と終点精度調整中に表示
             flightData(ii, tt, hh, xArray)
 
+def graphDando(x, y, z):
+    # グラフの表示
+    # フォント設定
+    plt.rcParams['font.family'] = 'Hiragino Sans'
+    # 太さ設定
+    #plt.rcParams['font.weight'] = 'bold'
 
-# グラフの表示
-# フォント設定
-plt.rcParams['font.family'] = 'Hiragino Sans'
-# 太さ設定
-#plt.rcParams['font.weight'] = 'bold'
+    _, (ax1, ax2) = plt.subplots(2, 1, figsize=(
+        8, 6), tight_layout=True, sharex="all")
 
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(
-    8, 6), tight_layout=True, sharex="all")
+    ax1.plot(x, z)
+    ax1.set_title("BB弾の弾道")
+    #ax.set_xlim(0, 50)
+    #ax.set_ylim(0, 1.4)
+    ax1.grid()
+    #ax1.set_xlabel('距離  [m]')
+    ax1.set_ylabel('高さ  [m]')
 
-ax1.plot(gx, gz)
-ax1.set_title("BB弾の弾道")
-#ax.set_xlim(0, 50)
-#ax.set_ylim(0, 1.4)
-ax1.grid()
-#ax1.set_xlabel('距離  [m]')
-ax1.set_ylabel('高さ  [m]')
+    y = y * 1000    # m -> mm
+    ax2.plot(x, y)
+    ax2.sharex(ax1)
+    #ax.set_xlim(0, 50)
+    #ax.set_ylim(0, 1.0)
+    ax2.invert_yaxis()
+    ax2.grid()
+    ax2.set_xlabel('距離  [m]')
+    ax2.set_ylabel('左右  [mm]')
+    plt.show()
 
-gy = gy * 1000    # m -> mm
-ax2.plot(gx, gy)
-ax2.sharex(ax1)
-#ax.set_xlim(0, 50)
-#ax.set_ylim(0, 1.0)
-ax2.invert_yaxis()
-ax2.grid()
-ax2.set_xlabel('距離  [m]')
-ax2.set_ylabel('左右  [mm]')
-plt.show()
+
+# graphDando(gx, gy, gz)
 
 # 特別データ #####
-for d in dist:
-    print(f"Cd {d[0]:7.4f}  距離 {d[1]:8.5f} m")
+#for d in dist:
+#    print(f"Cd {d[0]:7.4f}  距離 {d[1]:8.5f} m")
 #####
 
 print("プログラム終了 ストップ")
-while 1:
-    pass
+# while 1:
+#     pass
