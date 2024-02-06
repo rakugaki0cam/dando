@@ -209,7 +209,7 @@ def rkfd(x, n):
     return fn
 
 
-def rkf45(t, h, x, xe=9999, timeEnd=9999):
+def rkf45(t, h, x, xe=9999, timeEnd=9999.99):
     # ルンゲ・クッタ=フェールベルグ法
     # 刻み幅自動制御
     # t:    時刻(+)
@@ -236,6 +236,9 @@ def rkf45(t, h, x, xe=9999, timeEnd=9999):
 
     info = 0
     loopFlag = 1
+    
+    t2 = 0
+    x4 = np.zeros(N)
 
     # 精度値の計算
     Sy = magVector(x, kai)
@@ -400,6 +403,8 @@ def energy(m, v):
 
 
 def fGr(direction):
+    """ 
+    """
     # 重力 -mg z軸方向のみ
     # dir: 0,1,2 = x,y,z
     if direction == 2:
@@ -410,6 +415,15 @@ def fGr(direction):
 
 
 def fAirReg(direction, v):
+    """_summary_
+
+    Args:
+        direction (_type_): _description_
+        v (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
     # 空気抵抗力
     # 粘性抵抗分も含まれる
     # dir: 0,1,2 = x,y,z
@@ -600,6 +614,7 @@ def Fphi(u, omega, phi):
     #   /
     #   0
 
+    fphi = 0
     a = (u / (rBb * omega)) * math.sin(phi)
 
     if a <= 0:

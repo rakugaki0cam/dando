@@ -226,6 +226,9 @@ def rkf45(t, h, x, xe):
     info = 0
     loopFlag = 1
 
+    t2 = 0
+    x4 = np.zeros(N)
+
     # 精度値の計算
     Sy = magVector(x, kai)
     if Sy > 1:
@@ -569,7 +572,8 @@ def Fphi(u, omega, phi):
     #   |  |u sinφ - Rωsinθ| (u sinφ - Rωsinθ) sin^2 θ dθ
     #   /
     #   0
-
+    
+    fphi = 0
     a = (u / (rBb * omega)) * math.sin(phi)
 
     if a <= 0:
