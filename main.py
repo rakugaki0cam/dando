@@ -27,21 +27,21 @@ import matplotlib.pyplot as plt
 
 ### 諸元 #####
 # 気象
-temp = 29.3             # 気温[°C]
-humi = 58.5 / 100      # 湿度[%]   (%RH)
-pres = 1016.2 * 100    # 気圧[Pa]  (hPa)
+temp = 25.0             # 気温[°C]
+humi = 60.0 / 100      # 湿度[%]   (%RH)
+pres = 1013.25 * 100   # 気圧[Pa]  (hPa)
 # BB
 g = 9.80665             # 重力[m/sec^2]
 mBb = 0.280 * 1e-3       # BB弾質量[kg] (g)
 rBb = 5.95 / 2 * 1e-3   # BB弾半径[m]  (φmm)
-v0 = 20.93               # 初速[m/sec]
-hop = 194               # ホップ回転数[rps]
+v0 = 83.94               # 初速[m/sec]
+hop = 220               # ホップ回転数[rps]
 # マトまでの距離
 v0meas = 0.031          # 初速測定装置中心[m]　センサ1-2の中間位置
 v0Correct = 1           # 初速補正あり:1 　センサ1位置での初速を推測補正する
-xTarget1 = 2.5        # 水平距離[m]
+xTarget1 = 7.5        # 水平距離[m]
 xTarget2 = 30          # 次が999でストップ
-xTarget3 = 50
+xTarget3 = 100
 # 射出時の角度
 elevAngle = 0.0         # 射出時の上下角度[°] 仰角＋、俯角ー
 lrAngle = 0.0         # 射出時の左右角度[°] 右＋、左ー （必ずゼロ）
@@ -52,15 +52,15 @@ dWind = 3               # 風向き[時] 3時:右からの風
 # 初期位置
 x0 = 0.0                # 距離[m]
 y0 = 0.0                # 左右[m]
-z0 = 1.0                # 高さ[m]
+z0 = 0.3                # 高さ[m]
 # ブレ（初期速度）
 vy = 0                  # 左右方向のブレ[m/sec]
 # 空気抵抗係数のフィッティング式
 #CdMethod = "Morrison"
 #CdMethod = "Clift&Gauvin"
-CdMethod = "fixed0.43"
+CdMethod = "fixed0.45"
 # 空気抵抗係数の実験補正値
-kCd = 0.979
+kCd = 1.000
 # 回転数減衰の計算方法
 ik = 0  # 0:積分計算　1:近似計算
 # 時間
@@ -458,8 +458,8 @@ def Cd(Re):
         cd = c1 + c2
         #print("C&G Cd =", cd)
 
-    elif CdMethod == "fixed0.43":
-        cd = 0.43
+    elif CdMethod == "fixed0.45":
+        cd = 0.45
         #print("Fixed Cd =", cd)
     else:
         print("Cd エラー")
